@@ -1,5 +1,11 @@
 # 变更记录
 
+## v1.0.9 — 抖音播放器 ID 提取再增强（2026-11-07）
+
+- DOM 播放器 ID 提取改为扫描所有祖先节点上的 `data-*` 属性，不再局限于固定字段名。
+- `_SSR_HYDRATED_DATA`、canonical URL、页面脚本媒体 URL、MAIN-world 当前节点标记继续作为多路兜底。
+- 预计时间与 MediaSource 后台捕获修复继续保留。
+
 ## v1.0.8 — 抖音当前视频取流继续增强（2026-11-07）
 
 - 增加 `_SSR_HYDRATED_DATA`、canonical/og:url 和更宽的 DOM 播放器属性/ID 提取。

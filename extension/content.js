@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.0.8
+/* LinkDrag — Chromium extension v1.0.9
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.0.8 and writes extension/content.js.
+ * manifest version into 1.0.9 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.0.8'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.0.8', name: '' }; }
+      return { version: String(m.version || '1.0.9'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.0.9', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -330,7 +330,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.0.8';
+    return '1.0.9';
   })();
 
   const TOP = window.self === window.top;
@@ -11113,6 +11113,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         const value = node.getAttribute && node.getAttribute(attr);
         if (value && /^\d{10,}$/.test(String(value))) return String(value);
       }
+      try {
+        for (const attr of Array.from(node.attributes || [])) {
+          if (/(aweme|video|item|vid|id)/i.test(attr.name) && /^\d{10,}$/.test(String(attr.value))) return String(attr.value);
+        }
+      } catch (e) { /* ignore */ }
       try {
         const outer = String(node.outerHTML || '');
         const opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));

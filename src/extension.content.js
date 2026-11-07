@@ -11114,6 +11114,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         if (value && /^\d{10,}$/.test(String(value))) return String(value);
       }
       try {
+        for (const attr of Array.from(node.attributes || [])) {
+          if (/(aweme|video|item|vid|id)/i.test(attr.name) && /^\d{10,}$/.test(String(attr.value))) return String(attr.value);
+        }
+      } catch (e) { /* ignore */ }
+      try {
         const outer = String(node.outerHTML || '');
         const opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));
         const match = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);

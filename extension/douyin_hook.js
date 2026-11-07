@@ -1,4 +1,4 @@
-﻿/* Runs in the page MAIN world on Douyin pages.  The player uses MSE + blob URLs,
+/* Runs in the page MAIN world on Douyin pages.  The player uses MSE + blob URLs,
    so content-script fetch(blob:) cannot read the media.  Capture the signed
    media URLs before they become blob URLs and post them to the content script. */
 (function () {
@@ -579,6 +579,15 @@ function generate_a_bogus(url_search_params, user_agent) {
           for (var ai = 0; ai < attrNames.length; ai++) {
             var value = node.getAttribute && node.getAttribute(attrNames[ai]);
             if (value && /^\d{10,}$/.test(String(value))) { domFound = String(value); break; }
+          }
+          if (!domFound && node.attributes) {
+            for (var di = 0; di < node.attributes.length; di++) {
+              var attr = node.attributes[di];
+              if (/(aweme|video|item|vid|id)/i.test(attr.name) && /^\d{10,}$/.test(String(attr.value))) {
+                domFound = String(attr.value);
+                break;
+              }
+            }
           }
           if (!domFound && node.outerHTML) {
             var outer = String(node.outerHTML);
