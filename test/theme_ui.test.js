@@ -27,3 +27,9 @@ test('streaming status uses dots but has no blinking block cursor', () => {
   assert.doesNotMatch(source, /▋/);
   assert.doesNotMatch(source, /ldp-stream-cursor/);
 });
+
+test('preview title bar has no LinkDrag brand icon', () => {
+  assert.doesNotMatch(source, /class="brand"/);
+  assert.doesNotMatch(source, /\.brand\{/);
+  assert.match(source, /class="title"/);
+});
