@@ -1,0 +1,12 @@
+# Local/test artifacts
+.dsh-*
+__pycache__/
+*.pyc
+
+# Generated package archives (the release ZIP lives in dist/)
+Link-Preview-Suite-v*.zip
+/LinkDrag-v*.zip
+test/screenshot-*.png
+
+# Browser-generated DNR metadata
+extension/_metadata/

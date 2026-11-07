@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LinkDrag</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="brand">
+    <img src="icons/48.png" alt="" width="34" height="34">
+    <div class="brand-text">
+      <strong>LinkDrag</strong>
+      <span>LinkDrag · <span id="version"></span></span>
+    </div>
+  </header>
+
+  <div id="unsupported" class="notice" hidden>
+    <strong>这个页面不能运行内容脚本</strong>
+    <p>chrome://、edge://、扩展商店和 PDF 内置查看器属于浏览器保护页面。请打开普通网页后再使用。</p>
+  </div>
+
+  <main id="main" hidden>
+    <section class="site-card">
+      <div class="site-line">
+        <div class="site-name" id="siteName">当前站点</div>
+        <span id="statusPill" class="pill">读取中</span>
+      </div>
+      <div class="site-url" id="siteUrl"></div>
+      <div class="site-meta"><span id="previewCount">0 个预览</span><span id="shortcutHint">Alt+Shift+L 暂停/恢复本站</span></div>
+    </section>
+
+    <section class="panel">
+      <label class="switch-row">
+        <span><b>全局启用</b><small>关闭后所有网站都不再自动弹预览</small></span>
+        <input type="checkbox" id="globalEnabled">
+        <i class="switch" aria-hidden="true"></i>
+      </label>
+      <label class="switch-row">
+        <span><b>暂停当前站点</b><small>只影响这个域名，设置页仍可打开</small></span>
+        <input type="checkbox" id="sitePaused">
+        <i class="switch" aria-hidden="true"></i>
+      </label>
+      <label class="switch-row">
+        <span><b>悬停预览小窗</b><small>鼠标停留 600ms 出现整屏缩略图</small></span>
+        <input type="checkbox" id="hoverPeek">
+        <i class="switch" aria-hidden="true"></i>
+      </label>
+      <label class="switch-row">
+        <span><b>链接旁浮出按钮</b><small>链接右侧的小预览按钮</small></span>
+        <input type="checkbox" id="linkButton">
+        <i class="switch" aria-hidden="true"></i>
+      </label>
+      <label class="switch-row">
+        <span><b>图片拖拽高清预览</b><small>拖图片直接看原图，不打开缩略网页</small></span>
+        <input type="checkbox" id="imageDragPreview">
+        <i class="switch" aria-hidden="true"></i>
+      </label>
+    </section>
+
+    <section class="quick-actions">
+      <button type="button" id="summaryPage" class="primary">总结当前网页</button>
+      <button type="button" id="summaryMedia">总结页面音视频</button>
+      <button type="button" id="openSidePanel">打开总结侧边栏</button>
+      <button type="button" id="openSettings">页面内完整设置</button>
+      <button type="button" id="openHelp">使用说明</button>
+      <button type="button" id="openOptions">选项与诊断</button>
+    </section>
+
+    <section class="history">
+      <div class="section-head"><h2>最近预览</h2><span id="historyEmpty">暂无记录</span></div>
+      <div id="historyList" class="history-list"></div>
+    </section>
+
+    <div id="message" class="message" role="status" aria-live="polite"></div>
+  </main>
+
+  <footer>
+    <span>MV3 · 高权限扩展版</span>
+    <button type="button" id="footerOptions">设置</button>
+  </footer>
+
+  <script src="i18n.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

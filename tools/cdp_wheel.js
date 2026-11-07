@@ -1,0 +1,20 @@
+'use strict';
+const port = process.argv[2] || '9436';
+const match = process.argv[3] || '127.0.0.1:8765';
+const x = Number(process.argv[4] || 300);
+const y = Number(process.argv[5] || 250);
+(async () => {
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const page = targets.find(t => t.type === 'page' && t.url.includes(match));
+  if (!page) throw new Error('page not found');
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  let id = 0; const pending = new Map();
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result); } };
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  const send = (method, params) => new Promise((resolve, reject) => { const n = ++id; pending.set(n, { resolve, reject }); ws.send(JSON.stringify({ id: n, method, params: params || {} })); });
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: 500, modifiers: 0 });
+  await new Promise(r => setTimeout(r, 500));
+  const res = await send('Runtime.evaluate', { expression: `(()=>{const h=document.querySelector('[data-ldp-host]');const w=h&&h.shadowRoot.querySelector('.settings-standalone');return {exists:!!w,count:h&&h.shadowRoot.querySelectorAll('.window').length,panel:w&&w.querySelector('.panel')&&{scrollTop:w.querySelector('.panel').scrollTop,scrollHeight:w.querySelector('.panel').scrollHeight,clientHeight:w.querySelector('.panel').clientHeight}}})()`, returnByValue: true });
+  console.log(JSON.stringify(res.result && res.result.value, null, 2));
+  ws.close();
+})().catch(e => { console.error(e); process.exitCode = 1; });

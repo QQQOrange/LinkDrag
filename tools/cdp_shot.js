@@ -1,0 +1,25 @@
+'use strict';
+const fs = require('fs');
+const port = process.argv[2] || '9336';
+(async () => {
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const page = targets.find(t => t.type === 'page' && /127\.0\.0\.1:8765\/index\.html/.test(t.url));
+  if (!page) throw new Error('page not found');
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  let id = 0; const pending = new Map();
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); if (m.error) p.reject(new Error(JSON.stringify(m.error))); else p.resolve(m.result); } };
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  const send = (method, params) => new Promise((resolve, reject) => { const n = ++id; pending.set(n, { resolve, reject }); ws.send(JSON.stringify({ id: n, method, params: params || {} })); });
+  await send('Page.enable');
+  await send('Runtime.enable');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await send('Page.bringToFront');
+  await send('Page.navigate', { url: 'http://127.0.0.1:8765/index.html?shot=' + Date.now() });
+  await new Promise(r => setTimeout(r, 1500));
+  await send('Runtime.evaluate', { expression: `(() => { const img=document.getElementById('testImage'); img.dispatchEvent(new Event('dragstart',{bubbles:true,cancelable:true,composed:true})); return true; })()`, userGesture: true });
+  await new Promise(r => setTimeout(r, 1400));
+  const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+  fs.writeFileSync('test/screenshot-image.png', Buffer.from(shot.data, 'base64'));
+  console.log('saved test/screenshot-image.png');
+  ws.close();
+})().catch(err => { console.error(err); process.exitCode = 1; });

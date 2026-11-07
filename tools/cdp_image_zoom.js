@@ -1,0 +1,20 @@
+'use strict';
+const port = process.argv[2] || '9339';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const page = targets.find(t => t.type === 'page' && /127\.0\.0\.1:8765/.test(t.url));
+  if (!page) throw new Error('page not found');
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  let id = 0; const pending = new Map();
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); if (m.error) p.reject(new Error(JSON.stringify(m.error))); else p.resolve(m.result); } };
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  const send = (method, params) => new Promise((resolve, reject) => { const n = ++id; pending.set(n, { resolve, reject }); ws.send(JSON.stringify({ id: n, method, params: params || {} })); });
+  const evaluate = async expression => { const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); return r.result && r.result.value; };
+  await send('Page.enable'); await send('Runtime.enable');
+  await send('Page.navigate', { url: 'http://127.0.0.1:8765/index.html?zoom=' + Date.now() });
+  await sleep(1400);
+  const out = await evaluate(`(async()=>{ const img=document.getElementById('testImage'); img.dispatchEvent(new MouseEvent('dragstart',{bubbles:true,cancelable:true,composed:true,clientX:150,clientY:150})); await new Promise(r=>setTimeout(r,1200)); const h=document.querySelector('[data-ldp-host]'); const sr=h&&h.shadowRoot; const w=sr&&sr.querySelector('.window.image-mode'); const el=w&&w.querySelector('.image-el'); const before=w&&w.querySelector('.zoom-label').textContent; el&&el.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true,composed:true})); await new Promise(r=>setTimeout(r,120)); const after=w&&w.querySelector('.zoom-label').textContent; return {before,after,imgW:el&&el.style.width,meta:w&&w.querySelector('.image-meta').textContent}; })()`);
+  console.log(JSON.stringify(out, null, 2));
+  ws.close();
+})().catch(e => { console.error(e); process.exitCode = 1; });

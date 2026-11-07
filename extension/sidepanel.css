@@ -1,0 +1,11 @@
+:root{color-scheme:light dark;--bg:#f6f7f9;--surface:#fff;--text:#1d2026;--muted:#6c7280;--border:#e1e4ea;--accent:#396bb5;--good:#2b7a55;--bad:#b33b4b}
+@media(prefers-color-scheme:dark){:root{--bg:#17191f;--surface:#20232b;--text:#e9ebf0;--muted:#9aa1ad;--border:#343844;--accent:#8fb2ff;--good:#79d2a5;--bad:#ff94a1}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.65 "Segoe UI","Microsoft YaHei",sans-serif}
+header{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(12px)}
+.brand{display:flex;align-items:center;gap:8px;font-size:13px}.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 13%,transparent)}
+.ghost{border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:5px 9px;font:11px inherit;cursor:pointer}.ghost:hover{border-color:var(--accent)}
+main{padding:18px 16px 30px}.empty{padding:44px 12px;text-align:center;color:var(--muted)}.empty-icon{font-size:28px;color:var(--accent);margin-bottom:8px}.empty h2{margin:0 0 8px;color:var(--text);font-size:16px}.empty p{margin:0;font-size:12px}
+.meta{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:10.5px;margin-bottom:8px}.kind{padding:2px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:650}
+h1{font-size:16px;line-height:1.4;margin:0 0 8px;word-break:break-word}.status{font-size:11px;color:var(--muted);margin-bottom:12px}.status.good{color:var(--good)}.status.bad{color:var(--bad)}
+.answer{padding:14px 14px 16px;border:1px solid var(--border);border-radius:11px;background:var(--surface);font-size:13px;line-height:1.8;white-space:pre-wrap;word-break:break-word}.answer h2,.answer h3{font-size:14px;margin:1em 0 .4em}.answer p{margin:.55em 0}.answer ul,.answer ol{margin:.5em 0;padding-left:1.4em}.answer code{padding:1px 4px;border-radius:4px;background:color-mix(in srgb,var(--text) 8%,transparent)}.answer a{color:var(--accent)}
+.source{margin-top:10px;color:var(--muted);font-size:10.5px;word-break:break-all}

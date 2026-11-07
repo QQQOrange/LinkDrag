@@ -1,0 +1,37 @@
+'use strict';
+const port = process.argv[2] || '9340';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const page = targets.find(t => t.type === 'page' && /127\.0\.0\.1:(8765|8766)/.test(t.url));
+  if (!page) throw new Error('page not found');
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  let id = 0; const pending = new Map();
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); if (m.error) p.reject(new Error(JSON.stringify(m.error))); else p.resolve(m.result); } };
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  const send = (method, params) => new Promise((resolve, reject) => { const n = ++id; pending.set(n, { resolve, reject }); ws.send(JSON.stringify({ id: n, method, params: params || {} })); });
+  const evaluate = async expression => { const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); return r.result && r.result.value; };
+  await send('Page.enable'); await send('Runtime.enable');
+  await send('Page.navigate', { url: 'http://127.0.0.1:8765/index.html?layout=' + Date.now() });
+  await sleep(1400);
+  const script = `(async()=>{
+    const closeAll=async()=>{const h=document.querySelector('[data-ldp-host]'); if(h) Array.from(h.shadowRoot.querySelectorAll('.window [data-action="close"]')).forEach(b=>b.click()); await new Promise(r=>setTimeout(r,800));};
+    const drag=async(id)=>{const el=document.getElementById(id); el.dispatchEvent(new MouseEvent('dragstart',{bubbles:true,cancelable:true,composed:true,clientX:200,clientY:200})); await new Promise(r=>setTimeout(r,1300));};
+    const win=()=>{const h=document.querySelector('[data-ldp-host]'); return h&&h.shadowRoot.querySelector('.window');};
+    await drag('pageLink');
+    for(let i=0;i<5;i++) win().querySelector('[data-action="plus"]').click();
+    const pageZoom=win().querySelector('.zoom-label').textContent;
+    await closeAll();
+    await drag('testImage');
+    for(let i=0;i<5;i++) win().querySelector('[data-action="plus"]').click();
+    const imageZoom=win().querySelector('.zoom-label').textContent;
+    await closeAll();
+    await drag('pageLink');
+    const restoredZoom=win().querySelector('.zoom-label').textContent;
+    const restoredTitle=win().querySelector('.title').textContent;
+    return {pageZoom,imageZoom,restoredZoom,restoredTitle};
+  })()`;
+  const out = await evaluate(script);
+  console.log(JSON.stringify(out, null, 2));
+  ws.close();
+})().catch(e => { console.error(e); process.exitCode = 1; });

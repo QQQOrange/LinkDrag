@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LinkDrag · Content summary</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="dot"></span><strong>LinkDrag · 内容总结</strong></div>
+    <button type="button" id="copy" class="ghost">复制</button>
+  </header>
+  <main>
+    <div id="empty" class="empty">
+      <div class="empty-icon">✦</div>
+      <h2>还没有总结</h2>
+      <p>在网页中点击「总结当前网页」或「总结页面音视频」，结果会显示在这里。</p>
+    </div>
+    <section id="result" hidden>
+      <div class="meta">
+        <span id="kind" class="kind">总结</span>
+        <span id="time"></span>
+      </div>
+      <h1 id="title"></h1>
+      <div id="status" class="status"></div>
+      <article id="answer" class="answer"></article>
+      <div id="source" class="source"></div>
+    </section>
+  </main>
+  <script src="i18n.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

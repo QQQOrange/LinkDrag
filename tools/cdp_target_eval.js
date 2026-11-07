@@ -1,0 +1,21 @@
+'use strict';
+const port = process.argv[2] || '9337';
+const match = process.argv[4] || '127.0.0.1:8765';
+const expr = process.argv[3] || 'document.title';
+(async () => {
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const page = targets.find(t => t.type === 'page' && t.url.includes(match));
+  if (!page) throw new Error('page not found: ' + match);
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  let id = 0; const pending = new Map(); const errors = [];
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); if (m.error) p.reject(new Error(JSON.stringify(m.error))); else p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); };
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  const send = (method, params) => new Promise((resolve, reject) => { const n = ++id; pending.set(n, { resolve, reject }); ws.send(JSON.stringify({ id: n, method, params: params || {} })); });
+  await send('Runtime.enable');
+  const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true, userGesture: true });
+  console.log(JSON.stringify(r.result && r.result.value, null, 2));
+  if (r.exceptionDetails) console.error(JSON.stringify(r.exceptionDetails, null, 2));
+  console.log('EXCEPTIONS', errors.length);
+  for (const e of errors.slice(0, 3)) console.log(JSON.stringify(e).slice(0, 1000));
+  ws.close();
+})().catch(e => { console.error(e); process.exitCode = 1; });

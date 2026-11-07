@@ -1,0 +1,120 @@
+{
+  "manifest_version": 3,
+  "name": "LinkDrag",
+  "short_name": "LinkDrag",
+  "version": "1.0",
+  "description": "LinkDrag — drag, hover, long-press or Alt+click links to preview pages in place; drag images to view originals; AI page/media summaries and SRT export.",
+  "minimum_chrome_version": "120",
+  "author": "FOX / QQQOrange / 完全体 (extension port)",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "clipboardWrite",
+    "contextMenus",
+    "tabs",
+    "scripting",
+    "sidePanel",
+    "offscreen",
+    "downloads",
+    "declarativeNetRequest",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "LinkDrag",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "toggle-site": {
+      "suggested_key": {
+        "default": "Alt+Shift+L",
+        "mac": "Alt+Shift+L"
+      },
+      "description": "Pause / resume LinkDrag for this site"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "file:///*"
+      ],
+      "js": [
+        "i18n.js",
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    },
+    {
+      "matches": [
+        "https://*.douyin.com/*",
+        "https://*.iesdouyin.com/*",
+        "http://*.douyin.com/*",
+        "http://*.iesdouyin.com/*"
+      ],
+      "js": [
+        "douyin_hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.youtube.com/*",
+        "http://*.youtube.com/*",
+        "https://*.bilibili.com/*",
+        "http://*.bilibili.com/*",
+        "https://*.tiktok.com/*",
+        "http://*.tiktok.com/*",
+        "https://*.x.com/*",
+        "https://*.twitter.com/*",
+        "https://*.instagram.com/*",
+        "https://*.facebook.com/*"
+      ],
+      "js": [
+        "media_hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "media_headers",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}

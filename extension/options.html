@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LinkDrag · Options & diagnostics</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="logo"><img src="icons/128.png" alt="" width="64" height="64"></div>
+      <div class="hero-copy">
+        <div class="eyebrow">CHROMIUM EXTENSION · MV3</div>
+        <h1>LinkDrag <span id="version"></span></h1>
+        <p>把任意链接在当前页浮出预览：多窗口、画中画、阅读模式、悬停小窗、只读快照、嵌套预览与会话恢复；拖拽图片直接查看高清原图。</p>
+        <div class="hero-actions">
+          <button type="button" class="primary" id="openPageSettings">在当前页打开完整设置</button>
+          <button type="button" id="openShortcuts">更改扩展快捷键</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="welcome" class="welcome" hidden>
+      <strong>安装成功。</strong> 打开任意普通网页，按住链接拖动、长按、Alt+点击，或把鼠标停在链接上约 600ms，即可看到预览。工具栏图标提供当前站点开关和最近预览。
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>扩展级开关</h2>
+        <p class="muted">这些开关对所有网站生效。更细的动画、主题、阅读模式与触发阈值在「页面内完整设置」里。</p>
+        <label class="row"><span><b>全局启用</b><small>关闭后自动入口与右键预览全部暂停</small></span><input type="checkbox" id="enabled"><i class="switch"></i></label>
+        <label class="row"><span><b>右键菜单</b><small>链接/选中网址/页面设置</small></span><input type="checkbox" id="contextMenu"><i class="switch"></i></label>
+        <label class="row"><span><b>工具栏计数徽标</b><small>显示当前标签页的预览窗口数</small></span><input type="checkbox" id="badgeCount"><i class="switch"></i></label>
+        <label class="block-label" for="language">界面语言</label>
+        <select id="language">
+          <option value="zh-CN">简体中文（默认）</option>
+          <option value="en">English</option>
+        </select>
+        <label class="block-label" for="disabledSites">暂停站点</label>
+        <textarea id="disabledSites" rows="3" placeholder="example.com, news.site.com"></textarea>
+        <p class="hint">每行或逗号分隔；子域名会一并暂停。暂停后设置/说明窗口仍可打开。</p>
+        <div class="save-row">
+          <button type="button" class="primary" id="saveBasic">保存扩展级设置</button>
+          <span id="saveState" class="save-state" role="status"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>运行诊断</h2>
+        <dl class="facts">
+          <div><dt>扩展版本</dt><dd id="factVersion">—</dd></div>
+          <div><dt>清单版本</dt><dd>Manifest V3</dd></div>
+          <div><dt>主机权限</dt><dd><span class="ok">http / https / file（需手动允许）</span></dd></div>
+          <div><dt>存储占用</dt><dd id="factStorage">—</dd></div>
+          <div><dt>后台抓取</dt><dd><span class="ok">Service Worker 独立抓取</span></dd></div>
+          <div><dt>快捷键</dt><dd>Alt+Shift+L 暂停/恢复本站</dd></div>
+        </dl>
+        <div class="diagnostic-actions">
+          <button type="button" id="openExtensions">打开扩展管理页</button>
+          <button type="button" id="openActiveTab">检查当前标签页</button>
+        </div>
+        <div id="diagState" class="save-state" role="status"></div>
+      </section>
+    </div>
+
+    <section class="card wide ai-config">
+      <h2>AI 页面助手</h2>
+      <p class="muted">AI 不会自动发起请求。已预置 DeepSeek、硅基流动、通义千问、Kimi、OpenAI、Ollama 等服务商配置，通常只需要填写 API Key；也可以改成任意 OpenAI 兼容接口。只有点击网页/播放器旁的 AI 按钮、总结入口或追问后，才会把对应正文发送到你配置的接口。</p>
+      <div class="ai-grid">
+        <label class="ai-field wide-field"><span>AI 服务商</span><select id="aiProvider"></select></label>
+        <label class="ai-field"><span>接口地址</span><input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com/v1/chat/completions" autocomplete="off"></label>
+        <label class="ai-field"><span>模型 <button type="button" id="fetchModels" class="mini-button">拉取模型</button></span><input type="text" id="aiModel" list="aiModelOptions" placeholder="deepseek-chat" autocomplete="off"><div class="ai-model-tools"><input type="text" id="aiModelSearch" placeholder="搜索模型…" autocomplete="off" hidden><select id="aiModelPick" hidden></select><div id="aiModelList" class="ai-model-list" hidden></div></div><datalist id="aiModelOptions"></datalist><span id="aiModelState" class="hint"></span></label>
+        <label class="ai-field wide-field"><span>API Key <small>仅保存在本机 chrome.storage.local；Ollama 等本地接口可留空</small></span><div class="ai-key-row"><input type="password" id="aiKey" placeholder="sk-..." autocomplete="new-password"><button type="button" id="testAIKey" class="mini-button">测试 Key</button><button type="button" id="clearAIKey" class="mini-button">清除</button></div></label>
+        <label class="ai-field wide-field"><span>媒体总结 API Key <small>硅基流动 · 单独配置与测试</small></span><div class="ai-key-row"><input type="password" id="mediaApiKey" placeholder="填写硅基流动 API Key" autocomplete="new-password"><button type="button" id="testMediaKey" class="mini-button">测试 Key</button><button type="button" id="clearMediaKey" class="mini-button">清除</button></div></label>
+        <label class="ai-field wide-field"><span>媒体总结模型 <small>音频转写模型</small></span><input type="text" id="mediaModel" list="mediaModelOptions" placeholder="FunAudioLLM/SenseVoiceSmall" autocomplete="off"><datalist id="mediaModelOptions"><option value="FunAudioLLM/SenseVoiceSmall"></option><option value="TeleAI/TeleSpeechASR"></option></datalist></label>
+        <label class="ai-field wide-field"><span>音频转写接口 <small>硅基流动 ASR 上传地址</small></span><input type="url" id="mediaEndpoint" placeholder="https://api.siliconflow.cn/v1/audio/transcriptions" autocomplete="off"></label>
+        <label class="ai-field wide-field"><span>音频总结提示词 <small>留空使用默认模板</small></span><input type="text" id="mediaAudioPrompt" placeholder="完整转写 + 结构化总结" autocomplete="off"></label>
+        <label class="ai-field wide-field"><span>视频总结提示词 <small>留空使用默认模板</small></span><input type="text" id="mediaVideoPrompt" placeholder="概述 + 关键节点 + 结论 + 画面文字" autocomplete="off"></label>
+      </div>
+      <div class="save-row">
+        <button type="button" class="primary" id="saveAI">保存 AI 设置</button>
+        <button type="button" id="testAI" class="mini-button">测试连接</button>
+        <span id="aiState" class="save-state" role="status"></span>
+      </div>
+    </section>
+
+    <section class="card wide">
+      <h2>这一版做了什么</h2>
+      <div class="three-col">
+        <div>
+          <h3>原生扩展能力</h3>
+          <ul>
+            <li>后台 Service Worker 跨域抓取，不受页面 CORS 限制</li>
+            <li>右键菜单直接预览链接 / 选中网址</li>
+            <li>工具栏快捷开关、站点暂停、窗口数徽标</li>
+            <li>扩展命令 Alt+Shift+L，可在浏览器里改键</li>
+            <li>扩展更新后可按需向旧标签页补注入内容脚本</li>
+          </ul>
+        </div>
+        <div>
+          <h3>核心增强</h3>
+          <ul>
+            <li>预览内跳转后，阅读模式 / 快照 / 新标签页使用当前地址</li>
+            <li>拖拽图片自动挑选最高清候选，支持缩放、平移与会话恢复</li>
+            <li>悬停从 A 链接快速移到 B 链接不再被旧定时器吞掉</li>
+            <li>预热去重键会随移出/收起重置，不再“第二次不预热”</li>
+            <li>设置/说明窗口不再占用 maxWindows 名额</li>
+            <li>抓取 4xx/5xx、超时、空壳与跨域错误分别说清楚</li>
+          </ul>
+        </div>
+        <div>
+          <h3>安全边界</h3>
+          <ul>
+            <li>阅读模式与快照均禁用脚本；快照额外移除音视频、表单和内嵌播放器，只读渲染</li>
+            <li>不接管中键：中键仍由浏览器开后台标签页</li>
+            <li>仅对媒体 CDN 请求补充 Referer；不修改页面响应头，不绕过 X-Frame-Options/CSP 嵌入限制</li>
+            <li>页面内设置使用 closed shadow root，页面脚本无法读取已保存的 API Key</li>
+            <li>消息带命名空间、iframe source、token 与 navSeq 校验，并对嵌套预览限流</li>
+            <li>受限页面（chrome://、扩展商店、PDF 查看器）无法注入，这是浏览器限制</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card wide">
+      <h2>常见问题</h2>
+      <details open>
+        <summary>为什么有些网站仍然不能直接嵌入？</summary>
+        <p>站点通过 X-Frame-Options 或 CSP frame-ancestors 拒绝被嵌入，扩展不会篡改网站响应头。脚本会自动用后台权限抓取 HTML，渲染成只读快照；纯 JavaScript 渲染的 SPA 可能只剩空壳，这时提示条会给出「在新标签页打开」。</p>
+      </details>
+      <details>
+        <summary>为什么 chrome://、edge:// 和扩展商店没有预览？</summary>
+        <p>这些是浏览器的受保护页面，任何扩展都不能向其中注入内容脚本。PDF 内置查看器同理。</p>
+      </details>
+      <details>
+        <summary>file:// 页面怎么启用？</summary>
+        <p>在扩展管理页打开本扩展的详情，启用「允许访问文件网址」。之后刷新本地页面即可。</p>
+      </details>
+      <details>
+        <summary>扩展刚刚重新加载，旧标签页没反应？</summary>
+        <p>点一下工具栏图标，扩展会按需向当前标签页注入内容脚本；也可以直接刷新页面。</p>
+      </details>
+      <details>
+        <summary>怎么完全恢复默认？</summary>
+        <p>页面内完整设置的底部有「恢复默认」。扩展级开关和暂停站点可以在本页修改。卸载扩展会清除全部本地数据。</p>
+      </details>
+    </section>
+
+    <footer class="footer">
+      <span>LinkDrag · <span id="footerVersion"></span> · based on the v20.3.0 userscript core</span>
+      <button type="button" id="clearData" class="danger-link">清除全部扩展数据</button>
+    </footer>
+  </div>
+  <script src="i18n.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
