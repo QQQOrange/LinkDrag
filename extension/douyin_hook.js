@@ -1,4 +1,4 @@
-/* Runs in the page MAIN world on Douyin pages.  The player uses MSE + blob URLs,
+﻿/* Runs in the page MAIN world on Douyin pages.  The player uses MSE + blob URLs,
    so content-script fetch(blob:) cannot read the media.  Capture the signed
    media URLs before they become blob URLs and post them to the content script. */
 (function () {
@@ -572,7 +572,7 @@ function generate_a_bogus(url_search_params, user_agent) {
         var bm = b.hasAttribute && b.hasAttribute('data-lps-current-video') ? 1 : 0;
         return (bm - am) || (score(b) - score(a));
       });
-      var attrNames = ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id'];
+      var attrNames = ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id', 'data-itemid', 'data-vid', 'data-e2e-vid', 'data-id'];
       for (var vi = 0; vi < videos.length && !domFound; vi++) {
         var node = videos[vi];
         for (var depth = 0; node && depth < 8 && !domFound; depth++, node = node.parentElement) {
@@ -583,7 +583,7 @@ function generate_a_bogus(url_search_params, user_agent) {
           if (!domFound && node.outerHTML) {
             var outer = String(node.outerHTML);
             var opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));
-            var hm = opening.match(/(?:aweme[_-]?id|video[_-]?id)["'\s:=]+(\d{10,})/i);
+            var hm = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);
             if (hm) domFound = hm[1];
           }
         }
@@ -677,3 +677,4 @@ function generate_a_bogus(url_search_params, user_agent) {
   });
 
 })();
+

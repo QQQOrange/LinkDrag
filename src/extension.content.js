@@ -9937,6 +9937,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (!item || item.closed || !item.videoState) return;
     const state = item.videoState;
     if (state.busy) return;
+    resetSummaryLoadingProgress(item);
     if (!state.info) state.info = {};
     if (!state.info.video || !state.info.video.isConnected) {
       // Preserve the player that was clicked; only then use the active player.
@@ -10290,6 +10291,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   let summaryLoadingStartedAt = 0;
   let summaryLoadingEstimate = 30;
   let summaryLoadingRemaining = 0;
+  let summaryLoadingProgress = 4;
+  let summaryLoadingSamples = [];
+  let summaryLoadingLastProgressAt = 0;
+  let summaryLoadingTicker = 0;
+  let summaryLoadingLastText = '';
   let summaryLoadingItem = null;
   const douyinCapturedUrls = [];
   const genericCapturedUrls = [];
@@ -10369,16 +10375,87 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return Math.floor(seconds / 60) + ' 分 ' + Math.ceil(seconds % 60) + ' 秒';
   }
 
+  function summaryStageFloor(text, value) {
+    if (value >= 100) return 0;
+    const label = String(text || '');
+    if (/(生成总结|AI 总结|总结生成|正在生成|流式生成)/.test(label)) return value >= 82 ? 12 : 18;
+    if (/(转写|ASR|解码|音频|音轨|捕获|录制|上传)/.test(label)) return 10;
+    if (/(字幕|正文|读取|扫描|解析|详情)/.test(label)) return 4;
+    return 6;
+  }
+
+  function renderSummaryLoadingEta() {
+    if (!summaryLoadingEta || !summaryLoadingItem) return;
+    const now = Date.now();
+    const elapsed = Math.max(0.1, (now - (summaryLoadingStartedAt || now)) / 1000);
+    const value = Math.max(4, Math.min(100, summaryLoadingProgress || 4));
+    if (value >= 100) {
+      summaryLoadingRemaining = 0;
+      summaryLoadingEta.textContent = '完成';
+      return;
+    }
+    const samples = summaryLoadingSamples.slice(-6);
+    let velocityRemaining = 0;
+    if (samples.length >= 2) {
+      const first = samples[0];
+      const last = samples[samples.length - 1];
+      const dv = last.value - first.value;
+      const dt = Math.max(0.2, (last.at - first.at) / 1000);
+      if (dv > 0) velocityRemaining = dt * (100 - value) / dv;
+    }
+    // A stage may be slow without changing the percentage (e.g. waiting for
+    // ASR or the first AI token).  Never let a stale estimate collapse to 0.
+    const stall = Math.max(0, (now - (summaryLoadingLastProgressAt || now)) / 1000 - 4);
+    const estimateRemaining = Math.max(0, summaryLoadingEstimate * (100 - value) / 100);
+    const floor = summaryStageFloor(summaryLoadingLastText, value);
+    const raw = Math.max(velocityRemaining, estimateRemaining, floor) + Math.min(45, stall);
+    if (!summaryLoadingRemaining) summaryLoadingRemaining = raw;
+    else if (raw > summaryLoadingRemaining) summaryLoadingRemaining = Math.min(raw, summaryLoadingRemaining + Math.max(2, stall * 0.7));
+    else summaryLoadingRemaining = Math.max(raw, summaryLoadingRemaining - Math.max(1, stall * 0.5));
+    summaryLoadingEta.textContent = elapsed < 2 && samples.length < 2
+      ? '正在估算… · 已用 ' + formatSummaryEta(elapsed)
+      : '预计剩余 ' + formatSummaryEta(summaryLoadingRemaining) + ' · 已用 ' + formatSummaryEta(elapsed);
+  }
+
+  function startSummaryLoadingTicker() {
+    if (summaryLoadingTicker) clearInterval(summaryLoadingTicker);
+    summaryLoadingTicker = setInterval(() => {
+      if (!summaryLoadingItem) return;
+      renderSummaryLoadingEta();
+    }, 1000);
+  }
+
+  function stopSummaryLoadingTicker() {
+    if (summaryLoadingTicker) clearInterval(summaryLoadingTicker);
+    summaryLoadingTicker = 0;
+  }
+
+  function resetSummaryLoadingProgress(item) {
+    if (summaryLoadingItem !== item) return;
+    summaryLoadingStartedAt = Date.now();
+    summaryLoadingEstimate = 30;
+    summaryLoadingRemaining = 0;
+    summaryLoadingProgress = 4;
+    summaryLoadingSamples = [{ at: Date.now(), value: 4 }];
+    summaryLoadingLastProgressAt = Date.now();
+    summaryLoadingLastText = '正在准备总结…';
+  }
+
   function showSummaryLoading(item, text) {
     ensureSummaryLoading();
     summaryLoadingItem = item;
     summaryLoadingStartedAt = Date.now();
     summaryLoadingEstimate = 30;
-    summaryLoadingRemaining = 30;
-    summaryLoadingText.textContent = text || '正在准备总结…';
+    summaryLoadingRemaining = 0;
+    summaryLoadingProgress = 4;
+    summaryLoadingSamples = [{ at: Date.now(), value: 4 }];
+    summaryLoadingLastProgressAt = Date.now();
+    summaryLoadingLastText = text || '正在准备总结…';
+    summaryLoadingText.textContent = summaryLoadingLastText;
     summaryLoadingPercent.textContent = '4%';
     summaryLoadingEta.textContent = '正在估算…';
     summaryLoadingBar.style.width = '4%';
+    startSummaryLoadingTicker();
     if (summaryLoadingHost) {
       summaryLoadingHost.dataset.theme = overlayThemeDark() ? 'dark' : 'light';
       summaryLoadingHost.hidden = false;
@@ -10389,38 +10466,30 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function setSummaryEstimate(item, seconds) {
     if (summaryLoadingItem !== item) return;
     summaryLoadingEstimate = Math.max(8, Math.min(600, Number(seconds) || 30));
-    summaryLoadingRemaining = Math.max(summaryLoadingRemaining || 0, summaryLoadingEstimate);
+    renderSummaryLoadingEta();
   }
 
   function updateSummaryLoading(item, percent, text) {
     if (summaryLoadingItem !== item) return;
-    const value = Math.max(4, Math.min(100, Number(percent) || 0));
-    if (text) summaryLoadingText.textContent = text;
+    const reported = Math.max(4, Math.min(100, Number(percent) || 0));
+    // Stages can have different percentages, but the visible progress bar
+    // should never move backwards during one task.
+    const value = Math.max(summaryLoadingProgress || 4, reported);
+    summaryLoadingProgress = value;
+    if (text) {
+      summaryLoadingText.textContent = text;
+      summaryLoadingLastText = text;
+    }
+    const now = Date.now();
+    const previous = summaryLoadingSamples[summaryLoadingSamples.length - 1];
+    if (!previous || value !== previous.value) {
+      summaryLoadingSamples.push({ at: now, value });
+      if (summaryLoadingSamples.length > 12) summaryLoadingSamples.shift();
+      summaryLoadingLastProgressAt = now;
+    }
     summaryLoadingBar.style.width = value + '%';
     if (summaryLoadingPercent) summaryLoadingPercent.textContent = Math.round(value) + '%';
-    if (summaryLoadingEta) {
-      const elapsed = Math.max(0.1, (Date.now() - (summaryLoadingStartedAt || Date.now())) / 1000);
-      if (value >= 100) {
-        summaryLoadingRemaining = 0;
-        summaryLoadingEta.textContent = '完成';
-      } else if (value <= 8) {
-        summaryLoadingRemaining = Math.max(0, summaryLoadingEstimate - elapsed);
-        summaryLoadingEta.textContent = '预计剩余 ' + formatSummaryEta(summaryLoadingRemaining);
-      } else {
-        // Estimate from actual progress velocity, but only allow the estimate
-        // to move downward.  This makes the displayed ETA follow the bar
-        // instead of jumping upward when a phase percentage changes.
-        const velocityRemaining = Math.max(0, elapsed * (100 - value) / Math.max(1, value));
-        const estimateRemaining = Math.max(0, summaryLoadingEstimate * (100 - value) / 100);
-        const targetRemaining = Math.max(velocityRemaining, estimateRemaining);
-        summaryLoadingRemaining = summaryLoadingRemaining
-          ? Math.min(summaryLoadingRemaining, targetRemaining)
-          : targetRemaining;
-        summaryLoadingEta.textContent = summaryLoadingRemaining > 0
-          ? '预计剩余 ' + formatSummaryEta(summaryLoadingRemaining)
-          : '已用 ' + formatSummaryEta(elapsed);
-      }
-    }
+    renderSummaryLoadingEta();
     if (item.ui) {
       if (item.ui.mediaPercent) item.ui.mediaPercent.textContent = Math.round(value) + '%';
       if (item.ui.videoPercent) item.ui.videoPercent.textContent = Math.round(value) + '%';
@@ -10430,6 +10499,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function hideSummaryLoading(item) {
     if (item && summaryLoadingItem !== item) return;
     summaryLoadingItem = null;
+    stopSummaryLoadingTicker();
     if (summaryLoadingHost) {
       summaryLoadingHost.hidden = true;
       summaryLoadingHost.style.setProperty('display', 'none', 'important');
@@ -11027,14 +11097,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (!video) return '';
     let node = video;
     for (let depth = 0; node && depth < 9; depth++, node = node.parentElement) {
-      for (const attr of ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id']) {
+      for (const attr of ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id', 'data-itemid', 'data-vid', 'data-e2e-vid', 'data-id']) {
         const value = node.getAttribute && node.getAttribute(attr);
         if (value && /^\d{10,}$/.test(String(value))) return String(value);
       }
       try {
         const outer = String(node.outerHTML || '');
         const opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));
-        const match = opening.match(/(?:aweme[_-]?id|video[_-]?id)["'\s:=]+(\d{10,})/i);
+        const match = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);
         if (match) return match[1];
       } catch (e) { /* ignore */ }
     }
@@ -11332,7 +11402,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         clone.addEventListener('canplay', onReady, { once: true });
         clone.addEventListener('error', onError, { once: true });
       });
-      if (!ready || !(Number(clone.duration) > 0) || !Number.isFinite(Number(clone.duration))) {
+      // MediaSource/Blob players often expose duration as NaN or Infinity
+      // until more segments arrive.  Metadata readiness is enough; the caller
+      // uses the source player duration as the capture deadline.
+      if (!ready) {
         removeBackgroundVideo(clone);
         return null;
       }
@@ -11407,7 +11480,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       try { video.preservesPitch = true; } catch (e) { /* ignore */ }
       try { await video.play(); } catch (e) { /* ignore */ }
       const rawDuration = Number(video.duration);
-      const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 0;
+      const duration = Number.isFinite(rawDuration) && rawDuration > 0
+        ? rawDuration : (Number(opts && opts.duration) || 0);
       const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / rate + 2000)) : 5 * 60 * 1000;
       await new Promise(resolve => {
         let done = false;
@@ -11519,7 +11593,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       try { video.preservesPitch = true; } catch (e) { /* ignore */ }
       try { await video.play(); } catch (e) { /* ignore */ }
       const rawDuration = Number(video.duration);
-      const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 0;
+      const duration = Number.isFinite(rawDuration) && rawDuration > 0
+        ? rawDuration : (Number(opts && opts.duration) || 0);
       const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / rate + 2000)) : 5 * 60 * 1000;
       await new Promise(resolve => {
         let done = false;
@@ -11688,7 +11763,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       try { if (rawStream) rawStream.getTracks().forEach(track => track.stop()); } catch (e) { /* ignore */ }
       restorePlayback();
     }
-    if (fallback) return captureStreamAudioWebAudio(video, item, { captureRate: rate, background: background });
+    if (fallback) return captureStreamAudioWebAudio(video, item, {
+      captureRate: rate,
+      background: background,
+      duration: Number(candidate && candidate.duration) || 0
+    });
     return result;
   }
 
@@ -12808,6 +12887,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   async function startTextSummary(item) {
     const state = item.mediaState;
     if (!state || state.busy) return;
+    resetSummaryLoadingProgress(item);
     state.busy = true;
     state.error = '';
     state.answer = '';
@@ -13073,6 +13153,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     // button clicked during streaming disconnected the port and then returned,
     // leaving the UI stuck in "busy" until the watchdog fired.
     if (state.busy) { toast(item, '正在处理中，请先取消当前任务'); return; }
+    resetSummaryLoadingProgress(item);
     if (item.aiPort) { try { item.aiPort.disconnect(); } catch (e) { /* ignore */ } item.aiPort = null; }
     state.busy = true;
     state.cancelled = false;
@@ -13292,7 +13373,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
             if (state.cancelled || item.closed) { try { removeBackgroundVideo(backgroundVideo); } catch (e) { /* ignore */ } state.busy = false; return; }
             if (!audio) {
               if (status) status.textContent = '后台捕获不可用，正在尝试音频节点…';
-              audio = await captureMediaElementAudio(backgroundVideo, item, { background: true, captureRate: captureSpeed });
+              audio = await captureMediaElementAudio(backgroundVideo, item, {
+                background: true,
+                captureRate: captureSpeed,
+                duration: Number(candidate.duration) || Number(anchorVideo && anchorVideo.duration) || 0
+              });
               if (state.cancelled || item.closed) { try { removeBackgroundVideo(backgroundVideo); } catch (e) { /* ignore */ } state.busy = false; return; }
             }
             try { removeBackgroundVideo(backgroundVideo); } catch (e) { /* ignore */ }
@@ -13306,7 +13391,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
             if (state.cancelled || item.closed) { state.busy = false; return; }
             if (!audio) {
               if (status) status.textContent = '播放器音轨不可见，正在用音频节点捕获…';
-              audio = await captureMediaElementAudio(captureElement, item, { captureRate: 1 });
+              audio = await captureMediaElementAudio(captureElement, item, {
+                captureRate: 1,
+                duration: Number(candidate.duration) || Number(captureElement.duration) || 0
+              });
               if (state.cancelled || item.closed) { state.busy = false; return; }
             }
           } else if (status) {
