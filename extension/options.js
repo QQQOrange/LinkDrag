@@ -68,6 +68,78 @@ function setState(id, text, tone) {
   node.className = 'save-state' + (tone ? ' ' + tone : '');
 }
 
+async function parseAtomRelease() {
+  const response = await fetch('https://github.com/QQQOrange/LinkDrag/releases.atom', {
+    cache: 'no-store',
+    headers: { 'Accept': 'application/atom+xml,application/xml,text/xml' }
+  });
+  if (!response.ok) throw new Error('GitHub Atom HTTP ' + response.status);
+  const xml = await response.text();
+  const entry = xml.match(/<entry>[\s\S]*?<\/entry>/i);
+  if (!entry) throw new Error('GitHub Atom 没有发布记录');
+  const body = entry[0];
+  const link = body.match(/<link[^>]+rel=["']alternate["'][^>]+href=["']([^"']+)["']/i);
+  const title = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const updated = body.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i);
+  const url = link ? link[1].replace(/&amp;/g, '&') : '';
+  const tag = (url.match(/\/tag\/([^/?#]+)/) || [])[1] || '';
+  if (!tag) throw new Error('GitHub Atom 没有版本号');
+  return {
+    tag: decodeURIComponent(tag),
+    name: title ? title[1].replace(/<[^>]+>/g, '').trim() : '',
+    url: url || 'https://github.com/QQQOrange/LinkDrag/releases',
+    publishedAt: updated ? updated[1].trim() : ''
+  };
+}
+
+async function directUpdateCheck() {
+  const token = $('updateToken').dataset.clear === '1' ? '' : $('updateToken').value.trim();
+  const headers = {
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28'
+  };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  let response = await fetch('https://api.github.com/repos/QQQOrange/LinkDrag/releases/latest', {
+    cache: 'no-store',
+    headers
+  });
+  if (!response.ok && token) {
+    const publicHeaders = Object.assign({}, headers);
+    delete publicHeaders.Authorization;
+    response = await fetch('https://api.github.com/repos/QQQOrange/LinkDrag/releases/latest', {
+      cache: 'no-store',
+      headers: publicHeaders
+    });
+  }
+  let release = null;
+  if (response.ok) {
+    const data = await response.json();
+    release = {
+      tag: String(data.tag_name || ''),
+      name: String(data.name || data.tag_name || ''),
+      url: String(data.html_url || ''),
+      publishedAt: String(data.published_at || '')
+    };
+  } else {
+    release = await parseAtomRelease();
+  }
+  const latest = String(release.tag || '').replace(/^v/i, '').trim();
+  if (!latest) throw new Error('GitHub 没有返回版本号');
+  const parts = value => String(value).replace(/^v/i, '').split('.').map(x => Number((String(x).match(/^\d+/) || [0])[0]) || 0);
+  const a = parts(latest), b = parts(chrome.runtime.getManifest().version);
+  let newer = false;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) { newer = (a[i] || 0) > (b[i] || 0); break; }
+  }
+  return {
+    latestVersion: latest,
+    latestName: release.name || release.tag,
+    releaseUrl: release.url || 'https://github.com/QQQOrange/LinkDrag/releases',
+    publishedAt: release.publishedAt,
+    updateAvailable: newer
+  };
+}
+
 function renderUpdateStatus(config, fallback) {
   const node = $('updateStatus');
   const open = $('openUpdate');
@@ -125,9 +197,30 @@ async function checkUpdateNow() {
     result = await sendBackground({ type: 'ldp:checkUpdate', force: true });
   }
   if (!result || !result.ok) {
-    renderUpdateStatus({ lastError: (result && result.lastError) || tr('检查失败，请检查网络或令牌。', 'Check failed. Verify your network or token.') });
-    setState('updateState', '', 'bad');
-    return;
+    // The options page is a normal extension document with host permissions;
+    // checking directly here also survives a broken/sleeping service worker.
+    try {
+      const direct = await directUpdateCheck();
+      const all = await storageGet(UPDATE_CONFIG_KEY);
+      const current = all[UPDATE_CONFIG_KEY] && typeof all[UPDATE_CONFIG_KEY] === 'object' ? all[UPDATE_CONFIG_KEY] : {};
+      const saved = Object.assign({}, current, direct, {
+        enabled: $('updateEnabled').checked,
+        token: $('updateToken').dataset.clear === '1' ? '' : $('updateToken').value.trim(),
+        lastCheck: Date.now(),
+        lastError: ''
+      });
+      await storageSet({ [UPDATE_CONFIG_KEY]: saved });
+      $('updateToken').dataset.clear = '';
+      renderUpdateStatus(saved);
+      setState('updateState', saved.updateAvailable
+        ? tr('发现新版本；点击「打开 GitHub 发布页」自行下载。', 'A new version is available. Open the GitHub release page to download it.')
+        : tr('当前已是最新版本。', 'You are up to date.'), 'good');
+      return;
+    } catch (e) {
+      renderUpdateStatus({ lastError: (e && e.message) || tr('检查失败，请检查网络或令牌。', 'Check failed. Verify your network or token.') });
+      setState('updateState', '', 'bad');
+      return;
+    }
   }
   const all = await storageGet(UPDATE_CONFIG_KEY);
   const config = all[UPDATE_CONFIG_KEY] || result;
