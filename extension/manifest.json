@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LinkDrag",
   "short_name": "LinkDrag",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "LinkDrag — drag, hover, long-press or Alt+click links to preview pages in place; drag images to view originals; AI page/media summaries and SRT export.",
   "minimum_chrome_version": "120",
   "author": "FOX / QQQOrange / 完全体 (extension port)",

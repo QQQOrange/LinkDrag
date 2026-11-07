@@ -1,8 +1,8 @@
 ﻿# LinkDrag
 
-**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.0.2**.
+**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.0.3**.
 
-**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.0.2**。
+**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.0.3**。
 
 <p>
   <a href="#中文">简体中文</a> ·
@@ -54,7 +54,7 @@
 
 #### 界面与主题
 
-- 亮色/暗色 UI 自动主题同时参考页面真实底色和系统偏好：页面深色用夜间 UI，页面浅色用日间 UI；也可以强制日间或强制夜间。
+- 亮色/暗色 UI 自动主题只看**页面 UI 的颜色**（页头、导航、侧栏、页面底色等），并排除视频、音频、画布和播放器舞台；深色视频不会把浅色页面误判成夜间 UI。系统偏好作为辅助，也可以强制日间或强制夜间。
 - 中文/英文两种界面语言，默认简体中文，可在「选项与诊断」或页面内完整设置中切换为 English。
 - 总结窗口采用单滚动内容区和独立底部操作栏，长内容不会被按钮遮挡。
 - 设置、帮助、AI 配置、动画和快捷键均可在扩展中调整。
@@ -63,7 +63,7 @@
 
 #### 从 ZIP 安装（开发版）
 
-1. 下载 `dist/LinkDrag-v1.0.2.zip` 并解压。
+1. 下载 `dist/LinkDrag-v1.0.3.zip` 并解压。
 2. 打开 `edge://extensions` 或 `chrome://extensions`。
 3. 开启右上角「开发人员模式」。
 4. 点击「加载解压缩的扩展」，选择解压后的 `LinkDrag` 文件夹。
@@ -175,7 +175,7 @@ LinkDrag/
 
 ### 版本
 
-**v1.0.2** — 首个 LinkDrag 正式版本。
+**v1.0.3** — 首个 LinkDrag 正式版本。
 
 ---
 
@@ -222,7 +222,7 @@ LinkDrag/
 
 #### UI and themes
 
-- Automatic light/dark UI considers both the page's real background and the OS preference: dark pages use the night UI, light pages use the day UI; explicit light/dark remains available.
+- Automatic light/dark UI samples **page UI surfaces** (header, navigation, sidebar, page background) and explicitly excludes video, audio, canvas and player stages; a dark video cannot make a light page switch to the night UI. The OS preference is a secondary signal; explicit light/dark remains available.
 - Simplified Chinese and English UI. Simplified Chinese is the default; English can be selected and becomes the persisted default for subsequent pages.
 - Summary windows use one content scroller with a separate fixed action bar, so long content is never hidden behind buttons.
 - Settings, help, AI configuration, animation and shortcuts are configurable.
@@ -231,7 +231,7 @@ LinkDrag/
 
 #### Install from ZIP (development build)
 
-1. Download and extract `dist/LinkDrag-v1.0.2.zip`.
+1. Download and extract `dist/LinkDrag-v1.0.3.zip`.
 2. Open `edge://extensions` or `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the extracted `LinkDrag` folder.
@@ -318,12 +318,13 @@ powershell -ExecutionPolicy Bypass -File .\打包ZIP.ps1
 
 ### Version
 
-**v1.0.2** — first official LinkDrag release.
+**v1.0.3** — first official LinkDrag release.
 
 ---
 
 ## License / 许可
 
 This repository is provided as-is for personal and educational use. Third-party service names and trademarks belong to their respective owners. Media-discovery research references [cshuangyy/videdown](https://github.com/cshuangyy/videdown) (MIT); no yt-dlp binary is bundled. / 本项目按现状提供，供个人与学习用途；第三方服务名称与商标归各自所有者。媒体解析思路参考 [cshuangyy/videdown](https://github.com/cshuangyy/videdown)（MIT）；本项目不捆绑 yt-dlp 二进制。
+
 
 

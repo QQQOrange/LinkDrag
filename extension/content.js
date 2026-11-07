@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.0.2
+/* LinkDrag — Chromium extension v1.0.3
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.0.2 and writes extension/content.js.
+ * manifest version into 1.0.3 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.0.2'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.0.2', name: '' }; }
+      return { version: String(m.version || '1.0.3'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.0.3', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -330,7 +330,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.0.2';
+    return '1.0.3';
   })();
 
   const TOP = window.self === window.top;
@@ -943,6 +943,12 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
     'main', 'article', '[role="main"]', '#app', '#root', '#content', '#main',
     '.container', '.wrapper', '.main', '.app', '.layout', '[class*="layout"]', '[class*="page-"]'
   ];
+  // 自动取色只判断「页面 UI」的明暗；视频/音频/画布只是内容，不是 UI。
+  // 先看页头、导航、侧栏等真正的界面区域，再回退到 body/html。
+  const UI_COLOR_SELECTORS = [
+    'header', 'nav', '[role="banner"]', '[role="navigation"]', 'aside',
+    '[class*="header"]', '[class*="topbar"]', '[class*="toolbar"]', '[class*="sidebar"]'
+  ];
   const KIND_DARK_RE = /(^|[-_\s])(dark|night|dim|darkmode|dark-mode|dark-theme|theme-dark|night-mode|nightmode)([-_\s]|$)/i;
   const KIND_LIGHT_RE = /(^|[-_\s])(light|day|daymode|day-mode|light-theme|theme-light)([-_\s]|$)/i;
   /* v19.2：这里原先还有一个 ACCENT_SELECTORS（强调色候选按钮选择器）。v18 删掉
@@ -1065,6 +1071,23 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
       return { color: c, lum: getLuminance(c.r, c.g, c.b), alpha: c.a === undefined ? 1 : c.a, name };
     } catch (e) { return null; }
   }
+  function isMediaSurface(node) {
+    if (!node || node === document.documentElement || node === document.body) return false;
+    try {
+      const tag = String(node.tagName || '').toLowerCase();
+      if (tag === 'video' || tag === 'audio' || tag === 'canvas' || tag === 'img' || tag === 'picture') return true;
+      const media = node.querySelector && node.querySelector('video,audio,canvas');
+      if (!media) return false;
+      const nodeRect = node.getBoundingClientRect();
+      const mediaRect = media.getBoundingClientRect();
+      const area = Math.max(0, nodeRect.width * nodeRect.height);
+      const mediaArea = Math.max(0, mediaRect.width * mediaRect.height);
+      // A player stage whose visible area is mostly media is content, not UI.
+      // Keep a page shell with a real header/nav even if it contains a video.
+      return area > 0 && mediaArea / area > 0.55
+        && !node.querySelector('header,nav,[role="banner"],[role="navigation"]');
+    } catch (e) { return false; }
+  }
   /** color-scheme 声明：现代站点表达「我支持暗色」的标准方式 */
   function schemeTokens() {
     let tokens = '';
@@ -1136,7 +1159,8 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
 
     if (usePage) {
       const cands = [];
-      const consider = (node, name, w) => {
+      const consider = (node, name, w, ui) => {
+        if (!node || isMediaSurface(node)) return false;
         const info = readBackground(node, name);
         if (!info) return false;
         let big = true;
@@ -1146,9 +1170,21 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
           big = rect.width * rect.height > v.w * v.h * 0.35;
         } catch (e) { /* 忽略 */ }
         if (!big && w < 2) return false;
-        cands.push({ info, w: big ? w : w * 0.45, big });
+        // A visible UI header/nav is stronger evidence than a full-screen
+        // media stage, even if it is physically shorter than 35% of viewport.
+        cands.push({ info, w: big ? w : w * (ui ? 0.85 : 0.45), big, ui: !!ui });
         return true;
       };
+      // UI chrome has priority over a full-screen video stage.  A dark player
+      // on a light page must not make the extension choose dark.
+      let uiExtra = 0;
+      for (const sel of UI_COLOR_SELECTORS) {
+        if (uiExtra >= 4) break;
+        let node = null;
+        try { node = document.querySelector(sel); } catch (e) { node = null; }
+        if (!node || node === document.body || node === document.documentElement) continue;
+        if (consider(node, 'UI ' + sel, 3.4, true)) uiExtra++;
+      }
       consider(document.body, 'body', 2.6);
       consider(document.documentElement, 'html', 2.2);
       let extra = 0;
@@ -1165,7 +1201,9 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         const w = c.w * (0.5 + Math.abs(c.info.lum - 0.5) * 2.2);
         vote(c.info.lum < 0.5, w, `${c.info.name} 底色 ${cssRgb(c.info.color)}`);
       }
-      const solid = cands.find(c => c.big && c.info.alpha >= 0.9) || cands.find(c => c.info.alpha >= 0.9);
+      const solid = cands.find(c => c.ui && c.info.alpha >= 0.9)
+        || cands.find(c => c.big && c.info.alpha >= 0.9)
+        || cands.find(c => c.info.alpha >= 0.9);
       if (solid) out.base = solid.info.color;
       /* v18：这里原本还有一路「meta theme-color 兜底」。删掉了 ——
          它是站点主色（工具栏 / 状态栏的颜色），不是页面底色。多数站点的主色是蓝的，
