@@ -1,4 +1,4 @@
-﻿/* LinkDrag — Chromium extension v1.0.1
+/* LinkDrag — Chromium extension v1.0.1
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
@@ -13151,7 +13151,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         // failed, report the real local failure instead of the misleading
         // "视频必须先转为音频" backend error.
         state.busy = false;
-        state.error = '没有拿到可用音轨：当前视频是 Blob/MediaSource 流，播放器没有暴露可捕获的音轨。已尝试直接解析页面音频、视频音轨捕获和音频节点捕获；请先播放视频 1–2 秒后重试，或刷新页面。原始视频不会发给模型。';
+        state.error = '没有拿到可用音轨：当前视频是 Blob/MediaSource 流，既没有可直接下载的媒体地址，也无法克隆到后台播放器。已尝试详情接口、页面数据、网络请求和后台音轨捕获；不会在前台快进录制，也不会把原始视频发给模型。请刷新页面后重试，或换一个视频。';
         if (out) { out.classList.remove('streaming'); out.textContent = state.error; out.dataset.tone = 'bad'; }
         if (status) status.textContent = '没有可用音轨';
         if (typeof revealSummaryWindow === 'function') revealSummaryWindow(item);
