@@ -11422,7 +11422,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         };
         const onReady = () => finish(true);
         const onError = () => finish(false);
-        const timer = setTimeout(() => finish(false), 3500);
+        const timer = setTimeout(() => finish(false), 8000);
         clone.addEventListener('loadedmetadata', onReady, { once: true });
         clone.addEventListener('canplay', onReady, { once: true });
         clone.addEventListener('error', onError, { once: true });
