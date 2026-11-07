@@ -1,8 +1,8 @@
-# LinkDrag
+﻿# LinkDrag
 
-**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.0**.
+**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.0.1**.
 
-**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.0**。
+**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.0.1**。
 
 <p>
   <a href="#中文">简体中文</a> ·
@@ -49,6 +49,7 @@
 - 音视频总结窗口支持下载视频、下载音频、下载 SRT 字幕和复制总结。
 - **SRT 字幕**：有真实字幕后保留时间轴；纯 ASR 没有时间戳时按媒体时长生成连续、合法的估计时间轴。
 - 媒体流只有在没有可访问的直接地址时才使用播放器音轨捕获作为最后兜底；不会把原始视频直接发给 AI。
+- 需要录制兜底时会优先克隆一个**离屏播放器**，在后台以默认 4×（设置范围 2–8×）加速播放并捕获音轨；前台正常播放不受影响。抖音的 MSE 流无法克隆时会直接停止，不会在你看的播放器上偷偷快进。
 
 #### 界面与主题
 
@@ -61,7 +62,7 @@
 
 #### 从 ZIP 安装（开发版）
 
-1. 下载 `dist/LinkDrag-v1.0.zip` 并解压。
+1. 下载 `dist/LinkDrag-v1.0.1.zip` 并解压。
 2. 打开 `edge://extensions` 或 `chrome://extensions`。
 3. 开启右上角「开发人员模式」。
 4. 点击「加载解压缩的扩展」，选择解压后的 `LinkDrag` 文件夹。
@@ -128,7 +129,7 @@ API Key 保存在本机 `chrome.storage.local`。扩展不会自动上传浏览�
 - 受 DRM 保护或站点严格禁止读取的媒体无法导出。
 - HLS 的 MPEG-TS 分片、部分跨域防盗链和需要登录签名的媒体可能无法处理。
 - 纯 ASR 没有原始时间戳时，SRT 时间轴是按媒体时长生成的估计值。
-- MediaSource 流无法直接读取且没有可用网络地址时，才使用播放器音轨/视频录制作为兜底；录制会按实际播放时长耗时。
+- MediaSource 流无法直接读取且没有可用网络地址时，才使用播放器音轨录制作为兜底；录制优先走离屏克隆和后台倍速，若无法克隆则停止，不会在前台快进。
 
 ### 开发与测试
 
@@ -173,7 +174,7 @@ LinkDrag/
 
 ### 版本
 
-**v1.0** — 首个 LinkDrag 正式版本。
+**v1.0.1** — 首个 LinkDrag 正式版本。
 
 ---
 
@@ -215,6 +216,7 @@ LinkDrag/
 - Media summary windows can download video, download audio, download SRT subtitles and copy the summary.
 - **SRT subtitles**: real subtitle cues keep their timestamps; plain ASR without timestamps receives a valid continuous estimated timeline based on media duration.
 - Player capture is a last-resort fallback only when no accessible direct URL exists; raw video is never sent to the AI model.
+- When capture is unavoidable, LinkDrag first clones the player off-screen and records its audio at 4× by default (2–8× configurable); the visible player keeps normal playback. If a Douyin MSE stream cannot be cloned, LinkDrag stops instead of silently fast-forwarding the player you are watching.
 
 #### UI and themes
 
@@ -227,7 +229,7 @@ LinkDrag/
 
 #### Install from ZIP (development build)
 
-1. Download and extract `dist/LinkDrag-v1.0.zip`.
+1. Download and extract `dist/LinkDrag-v1.0.1.zip`.
 2. Open `edge://extensions` or `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the extracted `LinkDrag` folder.
@@ -292,7 +294,7 @@ API keys remain in local `chrome.storage.local`. LinkDrag does not automatically
 - DRM-protected media and media that the site blocks from reading cannot be exported.
 - HLS MPEG-TS segments, some cross-origin hotlink protections and login/signature-gated media may fail.
 - For plain ASR without timestamps, SRT timing is estimated from media duration.
-- If a MediaSource stream has no readable network URL, player audio/video recording is used only as a final fallback and takes real playback time.
+- If a MediaSource stream has no readable network URL, player audio recording is used only as a final fallback; it prefers an off-screen clone and background speed-up, and stops rather than fast-forwarding the visible player when cloning is impossible.
 
 ### Development and tests
 
@@ -314,10 +316,11 @@ powershell -ExecutionPolicy Bypass -File .\打包ZIP.ps1
 
 ### Version
 
-**v1.0** — first official LinkDrag release.
+**v1.0.1** — first official LinkDrag release.
 
 ---
 
 ## License / 许可
 
 This repository is provided as-is for personal and educational use. Third-party service names and trademarks belong to their respective owners. / 本项目按现状提供，供个人与学习用途；第三方服务名称与商标归各自所有者。
+

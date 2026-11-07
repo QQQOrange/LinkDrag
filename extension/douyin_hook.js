@@ -6,6 +6,7 @@
   if (window.__LPS_DOUYIN_MEDIA_HOOK__) return;
   window.__LPS_DOUYIN_MEDIA_HOOK__ = true;
   var seen = Object.create(null);
+  var lastApiAwemeId = '';
   function cleanUrl(value) {
     return String(value || '').replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/gi, '&');
   }
@@ -17,6 +18,8 @@
   }
   function report(url) {
     url = cleanUrl(url);
+    var idMatch = url.match(/[?&](?:aweme_id|item_id|group_id)=(\d{10,})/i);
+    if (idMatch) lastApiAwemeId = idMatch[1];
     if (!isMediaUrl(url) || seen[url]) return;
     seen[url] = true;
     try { window.postMessage({ source: 'LPS_DOUYIN_MEDIA', url: url }, '*'); } catch (e) { /* ignore */ }
@@ -26,6 +29,8 @@
     // Never regex-scan a whole media response.  API/page payloads that can
     // contain signed URLs are text and small; 2 MB is a generous ceiling.
     if (text.length > 2 * 1024 * 1024) return;
+    var idMatch = text.match(/["']aweme_id["']\s*:\s*["']?(\d{10,})/i);
+    if (idMatch) lastApiAwemeId = idMatch[1];
     var re = /https?:[^\s"'<>]+/g;
     var match;
     var count = 0;
@@ -543,11 +548,49 @@ function generate_a_bogus(url_search_params, user_agent) {
     } catch (e) { /* ignore */ }
     return '';
   }
-  function lpsAwemeId() {
+  function lpsAwemeId(preferred) {
+    if (preferred && /^\d{10,}$/.test(String(preferred))) return String(preferred);
     try {
       var match = location.pathname.match(/\/video\/(\d+)/) || location.search.match(/[?&](?:modal_id|aweme_id)=(\d+)/);
       if (match) return match[1];
     } catch (e) { /* ignore */ }
+    // Recommendation pages often keep the URL unchanged when the next clip
+    // starts.  Read the data attribute from the currently playing/visible
+    // player before falling back to potentially stale page data.
+    var domFound = '';
+    try {
+      var videos = Array.prototype.slice.call(document.querySelectorAll('video'));
+      videos.sort(function (a, b) {
+        var score = function (v) {
+          var s = 0;
+          try {
+            if (!v.paused) s += 100;
+            if (Number(v.currentTime) > 0.05) s += 40;
+            if (Number(v.videoWidth) > 0) s += 10;
+            var r = v.getBoundingClientRect();
+            if (r.width > 80 && r.height > 45 && r.bottom > 0 && r.top < window.innerHeight) s += 25;
+          } catch (e) { /* ignore */ }
+          return s;
+        };
+        return score(b) - score(a);
+      });
+      var attrNames = ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id'];
+      for (var vi = 0; vi < videos.length && !domFound; vi++) {
+        var node = videos[vi];
+        for (var depth = 0; node && depth < 8 && !domFound; depth++, node = node.parentElement) {
+          for (var ai = 0; ai < attrNames.length; ai++) {
+            var value = node.getAttribute && node.getAttribute(attrNames[ai]);
+            if (value && /^\d{10,}$/.test(String(value))) { domFound = String(value); break; }
+          }
+          if (!domFound && node.outerHTML) {
+            var hm = String(node.outerHTML).match(/(?:aweme[_-]?id|video[_-]?id)["'\s:=]+(\d{10,})/i);
+            if (hm) domFound = hm[1];
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
+    if (domFound) return domFound;
+    if (lastApiAwemeId) return lastApiAwemeId;
     var found = '';
     function scan(node, depth) {
       if (!node || depth > 8 || found) return;
@@ -610,7 +653,7 @@ function generate_a_bogus(url_search_params, user_agent) {
       try { window.postMessage(Object.assign({ source: 'LPS_DOUYIN_DETAIL_RESULT', id: requestId }, payload), '*'); } catch (e) { /* ignore */ }
     }
     try {
-      var awemeId = lpsAwemeId();
+      var awemeId = lpsAwemeId(event.data.awemeId || '');
       if (!awemeId) { reply({ ok: false, detail: '没有找到 aweme_id' }); return; }
       var query = lpsDetailParams(awemeId);
       var aBogus = generate_a_bogus(query, navigator.userAgent);
@@ -621,7 +664,7 @@ function generate_a_bogus(url_search_params, user_agent) {
           var detail = data && (data.aweme_detail || data.awemeDetail || data.detail);
           if (!detail) { reply({ ok: false, detail: '详情接口没有返回 aweme_detail' }); return; }
           var urls = lpsExtractDetailUrls(detail);
-          reply({ ok: !!(urls.audio.length || urls.video.length), audio: urls.audio, video: urls.video, title: String(detail.desc || document.title || '') });
+          reply({ ok: !!(urls.audio.length || urls.video.length), audio: urls.audio, video: urls.video, title: String(detail.desc || document.title || ''), awemeId: awemeId });
         })
         .catch(function (error) { reply({ ok: false, detail: String(error && error.message || '详情请求失败') }); });
     } catch (e) {

@@ -223,6 +223,7 @@
     '右键菜单「预览此链接」': 'Context menu “Preview this link”',
     '工具栏图标显示窗口数': 'Show window count on the toolbar icon',
     '修改即时生效 · 只保存在本机': 'Changes apply immediately · stored locally',
+    '后台音轨捕获倍速': 'Background capture speed',
     '这些开关对所有网站生效。更细的动画、主题、阅读模式与触发阈值在「页面内完整设置」里。': 'These switches apply everywhere. Fine-grained animation, theme, reader mode and trigger settings are in “In-page settings”.'
   };
 

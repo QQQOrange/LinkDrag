@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.0
+﻿/* LinkDrag — Chromium extension v1.0.1
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.0 and writes extension/content.js.
+ * manifest version into 1.0.1 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.0'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.0', name: '' }; }
+      return { version: String(m.version || '1.0.1'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.0.1', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -330,7 +330,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.0';
+    return '1.0.1';
   })();
 
   const TOP = window.self === window.top;
@@ -506,7 +506,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
     unifyAnim: false, unifiedAnim: 'apple',
     longPressOpen: true, longPressDelay: 500, altClickOpen: true, linkButton: true,
     aiQuick: true, aiQuickWhitelist: '', aiQuickBlacklist: '',
-    videoAI: true, summaryDock: 'right', summaryOpacity: 100, summaryFontSize: 14,
+    videoAI: true, summaryDock: 'right', summaryOpacity: 100, summaryFontSize: 14, captureRate: 4,
     // v20.2：peekVideo 三档 —— block（拒绝自动播放）/ snapshot（静音快照，绝对无声）/ allow（不干预）
     hoverPeek: true, hoverDelay: 600, peekVideo: 'block',
     dragHold: 150, warmup: true, embedFallback: true,
@@ -539,7 +539,8 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
     pipBarWidth: [120, 400, 10], phoneWidth: [280, 900, 20],
     readerFontSize: [12, 28, 1], readerLineHeight: [120, 260, 10],
     summaryOpacity: [40, 100, 2],
-    summaryFontSize: [12, 22, 1]
+    summaryFontSize: [12, 22, 1],
+    captureRate: [2, 8, 1]
   };
   const ANIM_CHOICES = [['none', '关闭'], ['apple', '苹果线性'], ['spring', '物理回弹']];
   const ENUMS = {
@@ -4416,6 +4417,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     ['summaryDock', '贴边位置', 'select', [['right', '右侧贴边'], ['left', '左侧贴边']]],
     ['summaryOpacity', '透明度(%)', 'number'],
     ['summaryFontSize', '总结文字字号(px)', 'number'],
+    ['captureRate', '后台音轨捕获倍速', 'number'],
     ['扩展集成'],
     ['enabled', '在网页中启用 LinkDrag', 'checkbox'],
     ['disabledSites', '暂停站点（逗号分隔）', 'text', null, '例如 example.com, news.site'],
@@ -10645,10 +10647,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       pushDouyinUrl(out, value.play_addr_bytevc1);
     }
   }
-  function collectDouyinAudioUrls(value, out, depth, parentKey) {
+  function collectDouyinAudioUrls(value, out, depth, parentKey, targetId) {
     if (!value || depth > 12 || out.length >= 8) return;
+    if (targetId && value && !Array.isArray(value) && value.aweme_id && String(value.aweme_id) !== String(targetId)) return;
     if (Array.isArray(value)) {
-      for (const item of value) collectDouyinAudioUrls(item, out, depth + 1, parentKey);
+      for (const item of value) collectDouyinAudioUrls(item, out, depth + 1, parentKey, targetId);
       return;
     }
     if (typeof value !== 'object') return;
@@ -10662,14 +10665,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       } else if (parentKey === 'music' && /^play_url(?:_h264|_h265)?$/i.test(key)) {
         pushDouyinUrl(out, child);
       }
-      collectDouyinAudioUrls(child, out, depth + 1, key);
+      collectDouyinAudioUrls(child, out, depth + 1, key, targetId);
     }
   }
 
-  function collectDouyinUrls(value, out, depth, parentKey) {
+  function collectDouyinUrls(value, out, depth, parentKey, targetId) {
     if (!value || depth > 10 || out.length >= 8) return;
+    if (targetId && value && !Array.isArray(value) && value.aweme_id && String(value.aweme_id) !== String(targetId)) return;
     if (Array.isArray(value)) {
-      for (const item of value) collectDouyinUrls(item, out, depth + 1, parentKey);
+      for (const item of value) collectDouyinUrls(item, out, depth + 1, parentKey, targetId);
       return;
     }
     if (typeof value !== 'object') return;
@@ -10677,7 +10681,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (/^play_addr(?:_h264|_h265|_bytevc1|_264|_265)?$/i.test(key) || (key === 'play_url' && parentKey !== 'music')) {
         pushDouyinUrl(out, child);
       }
-      collectDouyinUrls(child, out, depth + 1, key);
+      collectDouyinUrls(child, out, depth + 1, key, targetId);
     }
   }
 
@@ -10710,9 +10714,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
     const urls = [];
     const audioUrls = [];
+    const targetId = currentDouyinAwemeId();
     for (const root of roots) {
-      collectDouyinUrls(root, urls, 0);
-      collectDouyinAudioUrls(root, audioUrls, 0, '');
+      collectDouyinUrls(root, urls, 0, '', targetId);
+      collectDouyinAudioUrls(root, audioUrls, 0, '', targetId);
     }
     return { urls, audioUrls };
   }
@@ -10923,7 +10928,29 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
   }
 
-  function requestDouyinDetail() {
+  function currentDouyinAwemeId() {
+    try {
+      const fromUrl = location.pathname.match(/\/video\/(\d+)/) || location.search.match(/[?&](?:modal_id|aweme_id)=(\d+)/);
+      if (fromUrl) return fromUrl[1];
+    } catch (e) { /* ignore */ }
+    const videos = Array.from(document.querySelectorAll('video')).sort((a, b) => videoActivityScore(b) - videoActivityScore(a));
+    for (const video of videos) {
+      let node = video;
+      for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+        for (const attr of ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id']) {
+          const value = node.getAttribute && node.getAttribute(attr);
+          if (value && /^\d{10,}$/.test(String(value))) return String(value);
+        }
+        try {
+          const match = String(node.outerHTML || '').match(/(?:aweme[_-]?id|video[_-]?id)["'\s:=]+(\d{10,})/i);
+          if (match) return match[1];
+        } catch (e) { /* ignore */ }
+      }
+    }
+    return '';
+  }
+
+  function requestDouyinDetail(preferredAwemeId) {
     return new Promise(resolve => {
       if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname)) { resolve(null); return; }
       let settled = false;
@@ -10937,11 +10964,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       };
       const onMessage = event => {
         if (event.source !== window || !event.data || event.data.source !== 'LPS_DOUYIN_DETAIL_RESULT' || event.data.id !== id) return;
-        finish(event.data.ok ? { audio: event.data.audio || [], video: event.data.video || [], title: event.data.title || '' } : null);
+        finish(event.data.ok ? { audio: event.data.audio || [], video: event.data.video || [], title: event.data.title || '', awemeId: event.data.awemeId || '' } : null);
       };
       const timer = setTimeout(() => finish(null), 9000);
       window.addEventListener('message', onMessage);
-      try { window.postMessage({ source: 'LPS_DOUYIN_DETAIL', id }, '*'); } catch (e) { finish(null); }
+      try { window.postMessage({ source: 'LPS_DOUYIN_DETAIL', id, awemeId: preferredAwemeId || currentDouyinAwemeId() }, '*'); } catch (e) { finish(null); }
     });
   }
 
@@ -11122,8 +11149,72 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
   }
 
-  async function captureMediaElementAudio(video, item) {
+  // Recording a MediaSource player at 4x on the foreground element would make
+  // the user watch a fast-forward video.  Clone the player off-screen first and
+  // record that clone, leaving the visible playback completely untouched.
+  async function createBackgroundVideo(source) {
+    if (!source) return null;
+    const src = String(source.currentSrc || source.src || '').trim();
+    if (!/^(https?:|blob:|data:)/i.test(src)) return null;
+    let clone = null;
+    let host = null;
+    try {
+      // Keep the clone inside a closed shadow root so Douyin's own
+      // document.querySelectorAll('video') cannot select it as the feed video.
+      host = document.createElement('div');
+      host.setAttribute('aria-hidden', 'true');
+      host.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;';
+      const shadow = host.attachShadow({ mode: 'closed' });
+      clone = document.createElement('video');
+      clone.src = src;
+      clone.preload = 'auto';
+      clone.muted = true;
+      clone.volume = 0;
+      clone.playsInline = true;
+      clone.setAttribute('aria-hidden', 'true');
+      clone.style.cssText = 'width:1px;height:1px;';
+      clone.__lpsHost = host;
+      shadow.appendChild(clone);
+      document.documentElement.appendChild(host);
+      const ready = await new Promise(resolve => {
+        let done = false;
+        const finish = value => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          clone.removeEventListener('loadedmetadata', onReady);
+          clone.removeEventListener('canplay', onReady);
+          clone.removeEventListener('error', onError);
+          resolve(value);
+        };
+        const onReady = () => finish(true);
+        const onError = () => finish(false);
+        const timer = setTimeout(() => finish(false), 3500);
+        clone.addEventListener('loadedmetadata', onReady, { once: true });
+        clone.addEventListener('canplay', onReady, { once: true });
+        clone.addEventListener('error', onError, { once: true });
+      });
+      if (!ready || !(Number(clone.duration) > 0) || !Number.isFinite(Number(clone.duration))) {
+        removeBackgroundVideo(clone);
+        return null;
+      }
+      return clone;
+    } catch (e) {
+      try { removeBackgroundVideo(clone); } catch (e2) { /* ignore */ }
+      return null;
+    }
+  }
+
+  function removeBackgroundVideo(video) {
+    if (!video) return;
+    try { video.pause(); } catch (e) { /* ignore */ }
+    try { const host = video.__lpsHost; if (host && host.parentNode) host.remove(); else video.remove(); } catch (e) { /* ignore */ }
+  }
+
+  async function captureMediaElementAudio(video, item, opts) {
     if (!video) return null;
+    const rate = Math.max(1, Math.min(8, Number(opts && opts.captureRate) || 1.25));
+    const background = !!(opts && opts.background);
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtor) return null;
     let context = null;
@@ -11171,15 +11262,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       oldVolume = Number(video.volume);
       oldPreservesPitch = video.preservesPitch !== false;
       stateCaptured = true;
-      video.muted = false;
-      video.volume = Math.max(0.2, Number(video.volume) || 1);
+      if (background) { video.muted = false; video.volume = 0; }
+      else { video.muted = false; video.volume = Math.max(0.2, Number(video.volume) || 1); }
       video.currentTime = 0;
-      video.playbackRate = 1.25;
+      video.playbackRate = rate;
       try { video.preservesPitch = true; } catch (e) { /* ignore */ }
       try { await video.play(); } catch (e) { /* ignore */ }
       const rawDuration = Number(video.duration);
       const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 0;
-      const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / 1.25 + 2000)) : 5 * 60 * 1000;
+      const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / rate + 2000)) : 5 * 60 * 1000;
       await new Promise(resolve => {
         let done = false;
         const finish = () => { if (done) return; done = true; clearTimeout(timer); video.removeEventListener('ended', finish); resolve(); };
@@ -11214,7 +11305,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
   }
 
-  async function captureStreamAudioWebAudio(video, item) {
+  async function captureStreamAudioWebAudio(video, item, opts) {
+    const rate = Math.max(1, Math.min(8, Number(opts && opts.captureRate) || 1.25));
+    const background = !!(opts && opts.background);
     if (!video || typeof video.captureStream !== 'function' && typeof video.mozCaptureStream !== 'function') return null;
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtor) return null;
@@ -11281,15 +11374,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       oldVolume = Number(video.volume);
       oldPreservesPitch = video.preservesPitch !== false;
       stateCaptured = true;
-      video.muted = false;
-      video.volume = Math.max(0.2, Number(video.volume) || 1);
+      if (background) { video.muted = false; video.volume = 0; }
+      else { video.muted = false; video.volume = Math.max(0.2, Number(video.volume) || 1); }
       video.currentTime = 0;
-      video.playbackRate = 1.25;
+      video.playbackRate = rate;
       try { video.preservesPitch = true; } catch (e) { /* ignore */ }
       try { await video.play(); } catch (e) { /* ignore */ }
       const rawDuration = Number(video.duration);
       const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 0;
-      const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / 1.25 + 2000)) : 5 * 60 * 1000;
+      const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / rate + 2000)) : 5 * 60 * 1000;
       await new Promise(resolve => {
         let done = false;
         let lastTime = video.currentTime;
@@ -11361,6 +11454,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
 
   async function captureStreamAudio(candidate, item) {
+    const rate = Math.max(1, Math.min(8, Number(candidate && candidate.captureRate) || 1.25));
+    const background = !!(candidate && candidate.backgroundCapture);
     const video = candidate && candidate.element;
     if (!video || typeof video.captureStream !== 'function' && typeof video.mozCaptureStream !== 'function') return null;
     let rawStream = null;
@@ -11424,17 +11519,18 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       oldVolume = Number(video.volume);
       oldPreservesPitch = video.preservesPitch !== false;
       stateCaptured = true;
-      video.muted = false;
-      video.volume = Math.max(0.2, Number(video.volume) || 1);
-      if (item && item.ui && item.ui.mediaStatus) item.ui.mediaStatus.textContent = '正在从播放器录制音频…';
-      if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, 28, '正在从播放器录制音频…');
+      if (background) { video.muted = false; video.volume = 0; }
+      else { video.muted = false; video.volume = Math.max(0.2, Number(video.volume) || 1); }
+      const captureLabel = background ? ('正在后台 ' + rate + '× 录制音频…') : '正在从播放器录制音频…';
+      if (item && item.ui && item.ui.mediaStatus) item.ui.mediaStatus.textContent = captureLabel;
+      if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, 28, captureLabel);
       video.currentTime = 0;
-      video.playbackRate = 1.25;
+      video.playbackRate = rate;
       try { video.preservesPitch = true; } catch (e) { /* ignore */ }
       try { await video.play(); } catch (e) { /* autoplay may still work after gesture */ }
       const rawDuration = Number(video.duration);
       const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : (Number(candidate.duration) || 0);
-      const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / 1.25 + 2000)) : 5 * 60 * 1000;
+      const waitMs = duration ? Math.min(35 * 60 * 1000, Math.max(3000, duration * 1000 / rate + 2000)) : 5 * 60 * 1000;
       await new Promise(resolve => {
         let done = false;
         const finish = () => { if (done) return; done = true; clearTimeout(timer); video.removeEventListener('ended', finish); resolve(); };
@@ -11454,7 +11550,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       try { if (rawStream) rawStream.getTracks().forEach(track => track.stop()); } catch (e) { /* ignore */ }
       restorePlayback();
     }
-    if (fallback) return captureStreamAudioWebAudio(video, item);
+    if (fallback) return captureStreamAudioWebAudio(video, item, { captureRate: rate, background: background });
     return result;
   }
 
@@ -12860,7 +12956,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         state.list.unshift({ element: null, kind: 'video', url: douyinVideo, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
         state.textMode = false;
       } else {
-        const resolved = await requestDouyinResolve(location.href);
+        const resolveId = currentDouyinAwemeId();
+        const resolved = await requestDouyinResolve(resolveId ? 'https://www.douyin.com/video/' + resolveId : location.href);
         if (resolved && resolved.url) {
           state.list.unshift({ element: null, kind: /audio|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg/i.test(resolved.url) ? 'audio' : 'video', url: resolved.url, srcKind: 'direct', duration: 0, title: resolved.title || document.title || '', visible: true });
           state.textMode = false;
@@ -12919,20 +13016,20 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (typeof setSummaryEstimate === 'function') setSummaryEstimate(item, candidate.duration ? Math.max(20, Math.min(300, candidate.duration / 8 + 20)) : 60);
     if (item.ui && item.ui.mediaDownload) item.ui.mediaDownload.hidden = true;
     if (item.ui && item.ui.mediaAudioDownload) item.ui.mediaAudioDownload.hidden = true;
-    const activeDouyinVideo = /douyin\.com|iesdouyin\.com/i.test(location.hostname)
-      && candidate.element && videoActivityScore(candidate.element) >= 25;
-    if (/douyin\.com/i.test(location.hostname) && !activeDouyinVideo && (!candidate.url || candidate.srcKind === 'blob')) {
+    if (/douyin\.com/i.test(location.hostname) && (!candidate.url || candidate.srcKind === 'blob' || candidate.srcKind === 'stream')) {
       updateSummaryLoading(item, 16, '正在读取抖音详情并优先解析音频…');
-      const detail = await requestDouyinDetail();
+      const currentId = currentDouyinAwemeId();
+      const detail = await requestDouyinDetail(currentId);
       // A Douyin detail response's `music.play_url` is usually the background
       // music, not the spoken audio.  Prefer the real video stream and extract
       // its audio locally; only fall back to the music URL when no video URL
-      // exists at all.
-      if (detail && detail.video && detail.video.length) {
+      // exists at all.  Ignore a response for another aweme id.
+      const detailMatches = !currentId || !detail || !detail.awemeId || String(detail.awemeId) === String(currentId);
+      if (detail && detailMatches && detail.video && detail.video.length) {
         candidate.url = detail.video[0];
         candidate.srcKind = 'direct';
         candidate.kind = 'video';
-      } else if (detail && detail.audio && detail.audio.length) {
+      } else if (detail && detailMatches && detail.audio && detail.audio.length) {
         candidate.url = detail.audio[0];
         candidate.srcKind = 'direct';
         candidate.kind = 'audio';
@@ -13000,15 +13097,42 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         const captureElement = candidate.element && candidate.element.isConnected
           ? candidate.element
           : (/douyin\.com|iesdouyin\.com/i.test(location.hostname) ? findCaptureVideoElement() : null);
+        let backgroundVideo = null;
+        const captureSpeed = Math.max(2, Math.min(8, Number(settings.captureRate) || 4));
         if (!audio && captureElement && String(captureElement.tagName || '').toUpperCase() === 'VIDEO') {
-          if (status) status.textContent = '直接提取失败，正在从播放器转录音轨…';
-          updateSummaryLoading(item, 42, '正在把视频音轨转为音频…');
-          audio = await captureStreamAudio(Object.assign({}, candidate, { element: captureElement }), item);
-          if (state.cancelled || item.closed) { state.busy = false; return; }
-          if (!audio) {
-            if (status) status.textContent = '播放器音轨不可见，正在用音频节点捕获…';
-            audio = await captureMediaElementAudio(captureElement, item);
+          // Try an off-screen clone first.  The visible player keeps playing at
+          // normal speed while the clone is decoded at 4x/5x and recorded.
+          backgroundVideo = await createBackgroundVideo(captureElement);
+          if (backgroundVideo) {
+            if (status) status.textContent = '正在后台 ' + captureSpeed + '× 捕获音轨，前台播放不受影响…';
+            updateSummaryLoading(item, 42, '正在后台 ' + captureSpeed + '× 捕获音轨…');
+            audio = await captureStreamAudio(Object.assign({}, candidate, {
+              element: backgroundVideo,
+              backgroundCapture: true,
+              captureRate: captureSpeed
+            }), item);
+            if (state.cancelled || item.closed) { try { removeBackgroundVideo(backgroundVideo); } catch (e) { /* ignore */ } state.busy = false; return; }
+            if (!audio) {
+              if (status) status.textContent = '后台捕获不可用，正在尝试音频节点…';
+              audio = await captureMediaElementAudio(backgroundVideo, item, { background: true, captureRate: captureSpeed });
+              if (state.cancelled || item.closed) { try { removeBackgroundVideo(backgroundVideo); } catch (e) { /* ignore */ } state.busy = false; return; }
+            }
+            try { removeBackgroundVideo(backgroundVideo); } catch (e) { /* ignore */ }
+          } else if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
+            // Non-Douyin sites may use a MediaSource that cannot be cloned.
+            // Keep the older foreground fallback there, but never fast-forward
+            // a Douyin feed behind the user's back.
+            if (status) status.textContent = '无法后台克隆，正在从播放器转录音轨…';
+            updateSummaryLoading(item, 42, '正在把视频音轨转为音频…');
+            audio = await captureStreamAudio(Object.assign({}, candidate, { element: captureElement, captureRate: 1 }), item);
             if (state.cancelled || item.closed) { state.busy = false; return; }
+            if (!audio) {
+              if (status) status.textContent = '播放器音轨不可见，正在用音频节点捕获…';
+              audio = await captureMediaElementAudio(captureElement, item, { captureRate: 1 });
+              if (state.cancelled || item.closed) { state.busy = false; return; }
+            }
+          } else if (status) {
+            status.textContent = '该视频无法后台克隆，已停止录制；请重试或刷新页面。';
           }
         }
         if (audio) {
@@ -13137,3 +13261,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
 })(); 
 })();
+
+
+
+
