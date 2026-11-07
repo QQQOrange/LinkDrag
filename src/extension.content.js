@@ -10857,6 +10857,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     try { add(window._ROUTER_DATA); } catch (e) { /* ignore */ }
     try { add(window.__INITIAL_STATE__); } catch (e) { /* ignore */ }
     try { add(window._SSR_DATA); } catch (e) { /* ignore */ }
+    try { add(window._SSR_HYDRATED_DATA); } catch (e) { /* ignore */ }
     const ids = ['RENDER_DATA', '__NEXT_DATA__', '__NUXT_DATA__'];
     for (const id of ids) {
       const node = document.getElementById(id);
@@ -10879,6 +10880,17 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
     const urls = [];
     const audioUrls = [];
+    for (const script of Array.from(document.scripts || [])) {
+      const text = String(script.textContent || '');
+      if (!text || text.length > 2 * 1024 * 1024) continue;
+      const re = /https?:[^\s"'<>]+/g;
+      let match;
+      let count = 0;
+      while ((match = re.exec(text)) && count++ < 40) {
+        const url = match[0].replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/gi, '&');
+        if (isPlatformMediaUrl(url) && urls.indexOf(url) < 0) urls.push(url);
+      }
+    }
     const targetId = currentDouyinAwemeId();
     for (const root of roots) {
       collectDouyinUrls(root, urls, 0, '', targetId);
@@ -11122,6 +11134,12 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     // address bar.  Let the MAIN-world hook resolve the current node instead.
     if (anchorVideo) return '';
     try {
+      const canonical = document.querySelector('link[rel="canonical"],meta[property="og:url"]');
+      const canonicalUrl = canonical && (canonical.href || canonical.content || '');
+      const fromCanonical = String(canonicalUrl).match(/\/(?:video|note)\/(\d+)/i);
+      if (fromCanonical) return fromCanonical[1];
+    } catch (e) { /* ignore */ }
+    try {
       const fromUrl = location.pathname.match(/\/video\/(\d+)/) || location.search.match(/[?&](?:modal_id|aweme_id)=(\d+)/);
       if (fromUrl) return fromUrl[1];
     } catch (e) { /* ignore */ }
@@ -11363,7 +11381,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   async function createBackgroundVideo(source) {
     if (!source) return null;
     const src = String(source.currentSrc || source.src || '').trim();
-    if (!/^(https?:|blob:|data:)/i.test(src)) return null;
+    const sourceStream = source.srcObject || null;
+    if (!/^(https?:|blob:|data:)/i.test(src) && !sourceStream) return null;
     let clone = null;
     let host = null;
     try {
@@ -11374,7 +11393,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       host.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;';
       const shadow = host.attachShadow({ mode: 'closed' });
       clone = document.createElement('video');
-      clone.src = src;
+      if (src) clone.src = src;
+      else if (sourceStream) clone.srcObject = sourceStream;
       clone.preload = 'auto';
       clone.muted = true;
       clone.volume = 0;

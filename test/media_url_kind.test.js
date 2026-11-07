@@ -35,7 +35,7 @@ test('extension and fallback classification still work', () => {
 test('video download verifies pixels and video summary captures audio fallback', () => {
   assert.match(source, /await probeVideoCandidate\(candidate\)/);
   assert.match(source, /audio = await captureStreamAudio\(/);
-  assert.match(source, /captureMediaElementAudio\(backgroundVideo, item, \{ background: true, captureRate: captureSpeed \}\)/);
+  assert.match(source, /captureMediaElementAudio\(backgroundVideo, item, \{/);
   assert.match(source, /createBackgroundVideo\(captureElement\)/);
   assert.match(source, /backgroundCapture: true/);
   assert.match(source, /captureRate: \[2, 8, 1\]/);

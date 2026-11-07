@@ -606,6 +606,7 @@ function generate_a_bogus(url_search_params, user_agent) {
     }
     try { scan(window._ROUTER_DATA, 0); } catch (e) { /* ignore */ }
     try { scan(window.__INITIAL_STATE__, 0); } catch (e) { /* ignore */ }
+    try { scan(window._SSR_HYDRATED_DATA, 0); } catch (e) { /* ignore */ }
     return found;
   }
   function lpsDetailParams(awemeId) {
@@ -677,4 +678,5 @@ function generate_a_bogus(url_search_params, user_agent) {
   });
 
 })();
+
 
