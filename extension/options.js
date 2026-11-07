@@ -117,7 +117,13 @@ async function checkUpdateNow() {
   const state = $('updateState');
   state.className = 'save-state';
   state.textContent = tr('正在检查 GitHub 最新版本…', 'Checking GitHub for the latest release…');
-  const result = await sendBackground({ type: 'ldp:checkUpdate', force: true });
+  let result = await sendBackground({ type: 'ldp:checkUpdate', force: true });
+  if (!result) {
+    // A service worker can be asleep or restarting right after installation.
+    // Retry once before reporting a misleading network/token failure.
+    await new Promise(resolve => setTimeout(resolve, 450));
+    result = await sendBackground({ type: 'ldp:checkUpdate', force: true });
+  }
   if (!result || !result.ok) {
     renderUpdateStatus({ lastError: (result && result.lastError) || tr('检查失败，请检查网络或令牌。', 'Check failed. Verify your network or token.') });
     setState('updateState', '', 'bad');

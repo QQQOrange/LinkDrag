@@ -149,6 +149,41 @@ function openUpdateRelease() {
   });
 }
 
+async function fetchAtomRelease() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(`https://github.com/${UPDATE_REPO}/releases.atom`, {
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: { 'Accept': 'application/atom+xml,application/xml,text/xml' },
+      signal: controller.signal
+    });
+    if (!response.ok) return null;
+    const xml = await response.text();
+    const entry = xml.match(/<entry>[\s\S]*?<\/entry>/i);
+    if (!entry) return null;
+    const body = entry[0];
+    const link = body.match(/<link[^>]+rel=["']alternate["'][^>]+href=["']([^"']+)["']/i)
+      || body.match(/<link[^>]+href=["']([^"']+)["']/i);
+    const title = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const updated = body.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i);
+    const url = link ? String(link[1]).replace(/&amp;/g, '&') : '';
+    const tag = (url.match(/\/tag\/([^/?#]+)/) || [])[1] || '';
+    if (!tag) return null;
+    return {
+      tag_name: decodeURIComponent(tag),
+      html_url: url || `https://github.com/${UPDATE_REPO}/releases/tag/${tag}`,
+      name: title ? String(title[1]).replace(/<[^>]+>/g, '').trim() : '',
+      published_at: updated ? String(updated[1]).trim() : ''
+    };
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function checkForUpdate(force, manual) {
   const config = await readUpdateConfig();
   if (!config.enabled && !manual) return publicUpdateStatus(config);
@@ -167,13 +202,34 @@ async function checkForUpdate(force, manual) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      let response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
         headers,
         credentials: 'omit',
         cache: 'no-store',
         signal: controller.signal
       });
-      if (!response.ok) {
+      // Fine-grained tokens sometimes have no repository selected, which
+      // GitHub reports as 404 for this public repo.  Retry the public endpoint
+      // without the token instead of failing a valid token setup outright.
+      if (!response.ok && config.token && [401, 403, 404].includes(response.status)) {
+        const publicHeaders = Object.assign({}, headers);
+        delete publicHeaders.Authorization;
+        response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+          headers: publicHeaders,
+          credentials: 'omit',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+      }
+      let release = null;
+      if (response.ok) {
+        release = await response.json();
+      } else {
+        // If the API is rate-limited or the token cannot access this public
+        // repository, the public Atom feed still provides the latest tag.
+        release = await fetchAtomRelease();
+      }
+      if (!release) {
         const detail = response.status === 401 || response.status === 403
           ? 'GitHub 令牌无效或 API 限流（HTTP ' + response.status + '）'
           : response.status === 404
@@ -181,7 +237,6 @@ async function checkForUpdate(force, manual) {
             : 'GitHub 返回 HTTP ' + response.status;
         next.lastError = detail;
       } else {
-        const release = await response.json();
         const latestVersion = String(release.tag_name || '').replace(/^v/i, '').trim();
         if (!latestVersion) {
           next.lastError = 'GitHub 发布信息缺少版本号';
