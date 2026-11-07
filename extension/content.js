@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.0.1
+/* LinkDrag — Chromium extension v1.0.2
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.0.1 and writes extension/content.js.
+ * manifest version into 1.0.2 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.0.1'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.0.1', name: '' }; }
+      return { version: String(m.version || '1.0.2'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.0.2', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -330,7 +330,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.0.1';
+    return '1.0.2';
   })();
 
   const TOP = window.self === window.top;
@@ -10532,6 +10532,61 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return urls;
   }
 
+  function isPlatformMediaUrl(value) {
+    const url = String(value || '');
+    if (!isSafeRemoteUrl(url) || /\.(png|jpe?g|webp|gif|avif|svg)(?:$|\?)/i.test(url)) return false;
+    return /(\.mp4|\.webm|\.mov|\.mkv|\.m4s|\.mp3|\.m4a|\.aac|\.wav|\.ogg|\.opus|\.m3u8|\.mpd)(?:$|\?)/i.test(url)
+      || /(douyinvod|video\/tos|aweme\/v1\/play|kwimgs|kwaicdn|kspkg|sns-video|xhscdn|bilivideo|hdslb|googlevideo|videoplayback|tiktokcdn|tiktokv|v16-webapp|cdninstagram|fbcdn|video\.twimg\.com|mime_type=(?:video|audio)|audio\/tos)/i.test(url);
+  }
+
+  function pageDeclaredMediaUrls() {
+    const out = [];
+    const add = raw => {
+      const value = String(raw || '').replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/gi, '&');
+      if (!isPlatformMediaUrl(value) || out.some(item => item.url === value)) return;
+      if (out.length < 12) out.push({ url: value, title: document.title || '' });
+    };
+    try {
+      for (const node of Array.from(document.querySelectorAll('meta[property],meta[name]'))) {
+        const name = String(node.getAttribute('property') || node.getAttribute('name') || '').toLowerCase();
+        if (!/^(og:video|og:audio|twitter:player:stream|twitter:player)$/.test(name)) continue;
+        add(node.getAttribute('content'));
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      for (const node of Array.from(document.querySelectorAll('script[type="application/ld+json"]'))) {
+        const text = String(node.textContent || '').trim();
+        if (!text || text.length > 512 * 1024) continue;
+        let data = null;
+        try { data = JSON.parse(text); } catch (e) { continue; }
+        const walk = (value, depth) => {
+          if (!value || depth > 8) return;
+          if (Array.isArray(value)) { value.forEach(item => walk(item, depth + 1)); return; }
+          if (typeof value !== 'object') return;
+          for (const [key, child] of Object.entries(value)) {
+            if (/^(contentUrl|contentURL|video|audio|url)$/i.test(key)) add(child);
+            walk(child, depth + 1);
+          }
+        };
+        walk(data, 0);
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      const roots = [window.__NEXT_DATA__, window.__NUXT__, window.__INITIAL_STATE__, window._ROUTER_DATA];
+      const walk = (value, depth) => {
+        if (!value || depth > 8 || out.length >= 12) return;
+        if (Array.isArray(value)) { value.forEach(item => walk(item, depth + 1)); return; }
+        if (typeof value !== 'object') return;
+        for (const [key, child] of Object.entries(value)) {
+          if (/^(contentUrl|contentURL|playUrl|play_url|playAddr|play_addr|videoUrl|video_url|audioUrl|audio_url|src)$/i.test(key)) add(child);
+          walk(child, depth + 1);
+        }
+      };
+      roots.forEach(root => walk(root, 0));
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+
   function scanMediaCandidates() {
     const list = [];
     if (/x\.com|twitter\.com/i.test(location.hostname)) {
@@ -10572,6 +10627,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         visible: !!rect && rect.width > 0 && rect.height > 0
       });
     }
+    for (const declared of pageDeclaredMediaUrls()) {
+      if (list.some(candidate => candidate.url === declared.url)) continue;
+      const kind = mediaUrlKind(declared.url, 'video');
+      list.push({ element: null, kind: kind === 'audio' ? 'audio' : 'video', url: declared.url, srcKind: kind === 'audio' ? 'audio' : 'direct', duration: 0, title: declared.title || document.title || '', visible: true });
+    }
     list.sort((a, b) => (a.kind === 'audio' && b.kind !== 'audio' ? -1 : a.kind !== 'audio' && b.kind === 'audio' ? 1 : 0));
     if (!list.some(candidate => candidate.url && !/^blob:/i.test(candidate.url))) {
       const baseElement = list.find(candidate => candidate.element)?.element || null;
@@ -10598,7 +10658,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           .slice().sort((a, b) => (Number(b.startTime) || 0) - (Number(a.startTime) || 0))
           .map(entry => String(entry.name || '')).filter(name =>
             /\.(mp3|m4a|aac|wav|ogg|opus|mp4|webm|mov|m4s)(?:$|\?)/i.test(name) ||
-            /(douyinvod|video\/tos|mime_type=video|audio\/tos|mime_type=audio|googlevideo|videoplayback)/i.test(name));
+            /(douyinvod|video\/tos|mime_type=video|audio\/tos|mime_type=audio|kwimgs|kwaicdn|sns-video|xhscdn|bilivideo|hdslb|googlevideo|videoplayback|tiktokcdn|tiktokv|v16-webapp|cdninstagram|fbcdn|video\.twimg\.com)/i.test(name));
         for (const perf of perfList.slice(0, 8)) {
           const perfKind = mediaUrlKind(perf, 'video');
           const existing = list.find(candidate => candidate.url === perf);
@@ -10976,7 +11036,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
-      const timer = setTimeout(() => finish(null), 20000);
+      const timer = setTimeout(() => finish(null), 12000);
       if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { finish(null); return; }
       try {
         EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:resolveDouyin', url }, response => {
@@ -11006,6 +11066,21 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           finish();
         });
       } catch (e) { finish(); }
+    });
+  }
+
+  function requestKuaishouResolve(url) {
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+      const timer = setTimeout(() => finish(null), 12000);
+      if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { finish(null); return; }
+      try {
+        EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:resolveKuaishou', url }, response => {
+          try { void EXT.runtime.lastError; } catch (e) { /* ignore */ }
+          finish(response && response.ok ? response : null);
+        });
+      } catch (e) { finish(null); }
     });
   }
 
@@ -12949,17 +13024,18 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (!state.list || !state.list.length) state.list = scanMediaCandidates();
     if (/douyin\.com|iesdouyin\.com/i.test(location.hostname) && !state.list.some(candidate => candidate.url && !/^blob:/i.test(candidate.url))) {
       updateSummaryLoading(item, 14, '正在解析抖音视频地址…');
-      // Prefer a real video stream.  `music.play_url` is background music, not
-      // the spoken content, so it must never win over a video candidate.
-      const douyinVideo = resolveDouyinMediaUrl();
-      if (douyinVideo) {
-        state.list.unshift({ element: null, kind: 'video', url: douyinVideo, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
+      // Prefer the detail API's complete MP4 first.  `music.play_url` is
+      // background music, and a single captured .m4s segment is not a complete
+      // audio source, so neither may outrank the API result.
+      const resolveId = currentDouyinAwemeId();
+      const resolved = await requestDouyinResolve(resolveId ? 'https://www.douyin.com/video/' + resolveId : location.href);
+      if (resolved && resolved.url) {
+        state.list.unshift({ element: null, kind: /audio|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg/i.test(resolved.url) ? 'audio' : 'video', url: resolved.url, srcKind: 'direct', duration: Number(resolved.duration) || 0, title: resolved.title || document.title || '', visible: true });
         state.textMode = false;
       } else {
-        const resolveId = currentDouyinAwemeId();
-        const resolved = await requestDouyinResolve(resolveId ? 'https://www.douyin.com/video/' + resolveId : location.href);
-        if (resolved && resolved.url) {
-          state.list.unshift({ element: null, kind: /audio|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg/i.test(resolved.url) ? 'audio' : 'video', url: resolved.url, srcKind: 'direct', duration: 0, title: resolved.title || document.title || '', visible: true });
+        const douyinVideo = resolveDouyinMediaUrl();
+        if (douyinVideo) {
+          state.list.unshift({ element: null, kind: 'video', url: douyinVideo, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
           state.textMode = false;
         } else {
           const douyinAudio = resolveDouyinAudioUrl();
@@ -12968,6 +13044,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
             state.textMode = false;
           }
         }
+      }
+    }
+    if (/kuaishou\.com/i.test(location.hostname) && !state.list.some(candidate => candidate.url && !/^blob:/i.test(candidate.url))) {
+      updateSummaryLoading(item, 14, '正在解析快手视频地址…');
+      const resolved = await requestKuaishouResolve(location.href);
+      if (resolved && resolved.url) {
+        state.list.unshift({ element: null, kind: 'video', url: resolved.url, srcKind: 'direct', duration: Number(resolved.duration) || 0, title: resolved.title || document.title || '', visible: true });
+        state.textMode = false;
       }
     }
     if (/bilibili\.com/i.test(location.hostname) && typeof bilibiliAudioUrl === 'function') {

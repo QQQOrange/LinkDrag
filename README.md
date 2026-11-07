@@ -1,8 +1,8 @@
 ﻿# LinkDrag
 
-**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.0.1**.
+**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.0.2**.
 
-**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.0.1**。
+**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.0.2**。
 
 <p>
   <a href="#中文">简体中文</a> ·
@@ -45,6 +45,7 @@
 - 点击视频旁的 AI 按钮或工具栏「总结页面音视频」。
 - 优先读取字幕；没有字幕时优先寻找独立音频流；只有视频时先抽取音轨，再送 ASR，最后把转写文本交给文本 AI。
 - 支持原生 VTT/SRT、YouTube 字幕、Bilibili 字幕与音频流。
+- 多平台媒体发现：抖音、快手、B站、YouTube、TikTok、小红书、Instagram、X/Twitter 等公开视频；优先使用页面声明、JSON-LD、`og:video`/`og:audio` 和平台 CDN 地址。快手额外走 GraphQL 详情接口，抖音走详情 API + 页面/网络多路兜底。
 - 抖音推荐流/精选流单页刷新后会重新绑定当前正在播放的视频，并从最新网络请求、播放器父节点、页面数据和详情接口多路寻找真实媒体地址。
 - 音视频总结窗口支持下载视频、下载音频、下载 SRT 字幕和复制总结。
 - **SRT 字幕**：有真实字幕后保留时间轴；纯 ASR 没有时间戳时按媒体时长生成连续、合法的估计时间轴。
@@ -62,7 +63,7 @@
 
 #### 从 ZIP 安装（开发版）
 
-1. 下载 `dist/LinkDrag-v1.0.1.zip` 并解压。
+1. 下载 `dist/LinkDrag-v1.0.2.zip` 并解压。
 2. 打开 `edge://extensions` 或 `chrome://extensions`。
 3. 开启右上角「开发人员模式」。
 4. 点击「加载解压缩的扩展」，选择解压后的 `LinkDrag` 文件夹。
@@ -174,7 +175,7 @@ LinkDrag/
 
 ### 版本
 
-**v1.0.1** — 首个 LinkDrag 正式版本。
+**v1.0.2** — 首个 LinkDrag 正式版本。
 
 ---
 
@@ -212,6 +213,7 @@ LinkDrag/
 - Use the AI button beside a video or the toolbar's “Summarize page media”.
 - Subtitles first; otherwise an independent audio stream; otherwise extract audio from video, run ASR, then send the transcript to a text model.
 - Native VTT/SRT, YouTube captions, Bilibili captions and audio streams are supported.
+- Multi-platform discovery: Douyin, Kuaishou, Bilibili, YouTube, TikTok, Xiaohongshu, Instagram and X/Twitter when the page exposes public media. It uses page declarations, JSON-LD, `og:video`/`og:audio` and platform CDN URLs; Kuaishou also has a GraphQL detail resolver, and Douyin uses a detail API plus page/network fallbacks.
 - On Douyin recommendation/featured feeds, LinkDrag rebinds the currently playing video after an in-place feed refresh and searches the latest network requests, player parent data, page data and detail API for the real media URL.
 - Media summary windows can download video, download audio, download SRT subtitles and copy the summary.
 - **SRT subtitles**: real subtitle cues keep their timestamps; plain ASR without timestamps receives a valid continuous estimated timeline based on media duration.
@@ -229,7 +231,7 @@ LinkDrag/
 
 #### Install from ZIP (development build)
 
-1. Download and extract `dist/LinkDrag-v1.0.1.zip`.
+1. Download and extract `dist/LinkDrag-v1.0.2.zip`.
 2. Open `edge://extensions` or `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the extracted `LinkDrag` folder.
@@ -316,11 +318,12 @@ powershell -ExecutionPolicy Bypass -File .\打包ZIP.ps1
 
 ### Version
 
-**v1.0.1** — first official LinkDrag release.
+**v1.0.2** — first official LinkDrag release.
 
 ---
 
 ## License / 许可
 
-This repository is provided as-is for personal and educational use. Third-party service names and trademarks belong to their respective owners. / 本项目按现状提供，供个人与学习用途；第三方服务名称与商标归各自所有者。
+This repository is provided as-is for personal and educational use. Third-party service names and trademarks belong to their respective owners. Media-discovery research references [cshuangyy/videdown](https://github.com/cshuangyy/videdown) (MIT); no yt-dlp binary is bundled. / 本项目按现状提供，供个人与学习用途；第三方服务名称与商标归各自所有者。媒体解析思路参考 [cshuangyy/videdown](https://github.com/cshuangyy/videdown)（MIT）；本项目不捆绑 yt-dlp 二进制。
+
 

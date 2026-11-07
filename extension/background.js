@@ -529,15 +529,142 @@ async function fetchHlsDataUrl(url, depth) {
   return { ok: true, dataUrl: dataUrlFromBytes(merged, mime), size: total, mime, segments: segmentUrls.length };
 }
 
+function collectDouyinApiUrls(value, out, depth) {
+  if (!value || depth > 12 || out.length >= 16) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectDouyinApiUrls(item, out, depth + 1);
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (/^play_addr(?:_h264|_h265|_bytevc1|_264|_265)?$/i.test(key) || key === 'play_url') {
+      const list = child && Array.isArray(child.url_list) ? child.url_list : [];
+      for (const url of list.concat(child && typeof child === 'object' ? [child.url] : [child])) {
+        if (typeof url === 'string' && /^https?:\/\//i.test(url) && !out.some(item => item.url === url)) {
+          out.push({
+            url,
+            height: Number(child && child.height) || Number(value.height) || 0,
+            width: Number(child && child.width) || Number(value.width) || 0
+          });
+        }
+      }
+    }
+    collectDouyinApiUrls(child, out, depth + 1);
+  }
+}
+
+async function resolveDouyinApi(videoId) {
+  const apiUrl = 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=' + encodeURIComponent(videoId)
+    + '&aid=6383&channel=channel_pc_web&detail_list=1';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+  let res;
+  try {
+    res = await fetch(apiUrl, {
+      credentials: 'include',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.douyin.com/',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'zh-CN,zh;q=0.9'
+      }
+    });
+  } catch (e) { clearTimeout(timer); return null; }
+  clearTimeout(timer);
+  if (!res.ok) return null;
+  let data = null;
+  try { data = await res.json(); } catch (e) { return null; }
+  const detail = data && (data.aweme_detail || (Array.isArray(data.aweme_detail_list) ? data.aweme_detail_list[0] : null));
+  const video = detail && detail.video;
+  if (!video) return null;
+  const urls = [];
+  collectDouyinApiUrls(video.bit_rate || [], urls, 0);
+  collectDouyinApiUrls(video, urls, 0);
+  urls.sort((a, b) => (b.height || 0) - (a.height || 0));
+  return {
+    ok: true,
+    url: urls[0] && urls[0].url || '',
+    urls: urls.map(item => item.url),
+    title: String(detail.desc || '').trim(),
+    videoId: String(detail.aweme_id || videoId),
+    duration: Number(video.duration) || 0
+  };
+}
+
+async function resolveKuaishou(input) {
+  const source = String(input || '').trim();
+  if (!/^https?:\/\//i.test(source)) return { ok: false, reason: 'invalid-url' };
+  try {
+    let videoId = (source.match(/\/short-video\/([^?&#/]+)/i) || [])[1] || '';
+    const shortCode = (source.match(/\/f\/([^?&#/]+)/i) || [])[1] || '';
+    if (!videoId && shortCode) {
+      const redirect = await fetch('https://www.kuaishou.com/f/' + encodeURIComponent(shortCode), {
+        redirect: 'follow',
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' }
+      });
+      videoId = ((redirect.url || '').match(/\/short-video\/([^?&#/]+)/i) || [])[1] || '';
+    }
+    if (!videoId) return { ok: false, reason: 'invalid-url', detail: '无法识别快手视频 ID' };
+    const query = 'query VisionVideoDetail($photoId: String!) { visionVideoDetail(photoId: $photoId) { status photo { id duration caption coverUrl photoUrl photoH265Url manifest { adaptationSet { representation { url width height avgBitrate size } } } } } }';
+    const res = await fetch('https://www.kuaishou.com/graphql', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.kuaishou.com/'
+      },
+      body: JSON.stringify({ operationName: 'VisionVideoDetail', variables: { photoId: videoId }, query })
+    });
+    if (!res.ok) return { ok: false, reason: 'http', detail: '快手 HTTP ' + res.status };
+    const data = await res.json();
+    const photo = data && data.data && data.data.visionVideoDetail && data.data.visionVideoDetail.photo;
+    if (!photo) return { ok: false, reason: 'no-media', detail: '快手没有返回视频数据' };
+    const urls = [];
+    const sets = photo.manifest && photo.manifest.adaptationSet;
+    for (const set of Array.isArray(sets) ? sets : (sets ? [sets] : [])) {
+      for (const rep of (set && set.representation) || []) {
+        if (rep && /^https?:\/\//i.test(String(rep.url || ''))) urls.push({ url: rep.url, height: Number(rep.height) || 0 });
+      }
+    }
+    for (const raw of [photo.photoUrl, photo.photoH265Url]) {
+      if (/^https?:\/\//i.test(String(raw || ''))) urls.push({ url: raw, height: 0 });
+    }
+    urls.sort((a, b) => (b.height || 0) - (a.height || 0));
+    if (!urls.length) return { ok: false, reason: 'no-media', detail: '快手没有可下载的视频地址' };
+    return { ok: true, url: urls[0].url, title: String(photo.caption || '').trim(), duration: Math.round((Number(photo.duration) || 0) / 1000) };
+  } catch (e) {
+    return { ok: false, reason: 'network', detail: e && e.message ? String(e.message).slice(0, 180) : '' };
+  }
+}
+
 async function resolveDouyinShare(input) {
   const source = String(input || '').trim();
   if (!/^https?:\/\//i.test(source)) return { ok: false, reason: 'invalid-url' };
   const mobileUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  let apiTried = false;
   try {
+    const directId = source.match(/\/(?:video|note)\/(\d+)/i);
+    if (directId) {
+      apiTried = true;
+      try {
+        const apiResult = await resolveDouyinApi(directId[1]);
+        if (apiResult && apiResult.url) return apiResult;
+      } catch (e) { /* fall through */ }
+    }
     const shortRes = await fetch(source, { redirect: 'follow', headers: { 'User-Agent': mobileUA } });
     const finalUrl = shortRes.url || source;
     const idMatch = finalUrl.match(/\/(?:video|note)\/(\d+)/i) || source.match(/\/(?:video|note)\/(\d+)/i);
     if (!idMatch) return { ok: false, reason: 'invalid-url', detail: '无法从分享链接识别视频 ID' };
+    // Direct detail API first: it returns the complete play_addr / bit_rate
+    // list, including the audio-bearing MP4, without needing a share page.
+    if (!apiTried) {
+      try {
+        const apiResult = await resolveDouyinApi(idMatch[1]);
+        if (apiResult && apiResult.url) return apiResult;
+      } catch (e) { /* share-page fallback below */ }
+    }
     const pageUrl = 'https://www.iesdouyin.com/share/video/' + idMatch[1];
     const res = await fetch(pageUrl, { redirect: 'follow', headers: { 'User-Agent': mobileUA, Referer: 'https://www.iesdouyin.com/' } });
     if (!res.ok) return { ok: false, reason: 'http', detail: '抖音分享页 HTTP ' + res.status };
@@ -1212,6 +1339,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (type === 'ldp:resolveDouyin') {
     resolveDouyinShare(message.url).then(sendResponse, () => sendResponse({ ok: false, reason: 'network' }));
+    return true;
+  }
+
+  if (type === 'ldp:resolveKuaishou') {
+    resolveKuaishou(message.url).then(sendResponse, () => sendResponse({ ok: false, reason: 'network' }));
     return true;
   }
 

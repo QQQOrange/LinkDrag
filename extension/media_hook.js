@@ -119,7 +119,7 @@
   function report(url) {
     url = String(url || '');
     if (!/^https?:\/\//i.test(url) || seen[url]) return;
-    if (!/(\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.webm(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?)|\.m3u8(?:$|\?)|\.ts(?:$|\?)|video\/tos|audio\/tos|douyinvod|mime_type=video|mime_type=audio|aweme\/v1\/play|googlevideo|videoplayback)/i.test(url)) return;
+    if (!/(\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.webm(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?)|\.m3u8(?:$|\?)|\.ts(?:$|\?)|video\/tos|audio\/tos|douyinvod|mime_type=video|mime_type=audio|aweme\/v1\/play|kwimgs|kwaicdn|sns-video|xhscdn|bilivideo|hdslb|googlevideo|videoplayback|tiktokcdn|tiktokv|v16-webapp|cdninstagram|fbcdn|video\.twimg\.com)/i.test(url)) return;
     seen[url] = true;
     seenCount++;
     if (seenCount > 1000) { seen = Object.create(null); seenCount = 0; }
