@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.0.3
+﻿/* LinkDrag — Chromium extension v1.0.4
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.0.3 and writes extension/content.js.
+ * manifest version into 1.0.4 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.0.3'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.0.3', name: '' }; }
+      return { version: String(m.version || '1.0.4'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.0.4', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -330,7 +330,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.0.3';
+    return '1.0.4';
   })();
 
   const TOP = window.self === window.top;
@@ -1881,8 +1881,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .summary-answer-card{position:relative;flex:0 0 auto;border:1px solid color-mix(in srgb,var(--border) 55%,transparent)!important;border-radius:15px!important;background:linear-gradient(160deg,color-mix(in srgb,var(--surface) 72%,var(--bg)),color-mix(in srgb,var(--bg) 76%,transparent))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.32),0 10px 28px -24px rgba(20,32,60,.42);white-space:normal}
 .media-summary-answer,.video-summary-answer{min-height:180px!important;padding:17px 18px!important;font-size:13.5px;line-height:1.78!important;overflow:visible!important;max-height:none!important}
 .summary-answer-card:empty::before{content:"正在整理内容…";color:var(--muted);font-weight:500}
-.summary-answer-card.streaming::after{content:"";display:inline-block;width:2px;height:1.05em;margin-left:3px;border-radius:2px;background:var(--accent);vertical-align:-2px;animation:ldp-caret 1s steps(1,end) infinite}
-@keyframes ldp-caret{50%{opacity:0}}
+
 .summary-actions{position:relative!important;bottom:auto!important;z-index:3;display:flex;flex:0 0 auto;flex-wrap:wrap;align-items:center;gap:7px;margin:0!important;padding:10px 14px 12px!important;border-top:1px solid color-mix(in srgb,var(--border) 42%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 88%,transparent),var(--surface) 48%);box-shadow:0 -10px 24px -26px rgba(20,32,60,.48);border-radius:0}
 .summary-actions .text-button{padding:8px 11px!important;border-radius:9px!important;font-weight:600!important}
 .summary-actions .summary-action-primary{color:#fff!important;border-color:transparent!important;background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#7c5ce7))!important;box-shadow:0 8px 18px -10px color-mix(in srgb,var(--accent) 72%,transparent)}
@@ -1911,8 +1910,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .ai-prompt-toggle:hover,.ai-prompt-reset:hover{background:var(--hover);color:var(--text)}
 .ai-summary-prompt{width:100%;min-height:46px;max-height:120px;resize:vertical;padding:7px 9px;border:1px solid color-mix(in srgb,var(--border) 58%,transparent);border-radius:8px;background:color-mix(in srgb,var(--bg) 55%,transparent);color:var(--text);font:11.5px/1.55 inherit;outline:none}
 .ai-summary-prompt:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 12%,transparent)}
-.ai-answer.streaming::after{content:"▍";display:inline-block;margin-left:2px;color:var(--accent);animation:ldp-ai-caret .8s steps(2,end) infinite}
-@keyframes ldp-ai-caret{50%{opacity:0}}
+
 .ai-meta{margin-top:7px;min-height:16px;color:var(--muted);font-size:10.5px;letter-spacing:.01em}
 .ai-answer[data-tone="bad"]{color:#d85a6d;border-color:color-mix(in srgb,#d85a6d 38%,var(--border))}
 .ai-answer[data-tone="good"]{border-color:color-mix(in srgb,var(--accent) 26%,var(--border))}
@@ -12163,7 +12161,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (summaryAppearanceStyle) { try { summaryAppearanceStyle.remove(); } catch (e) { /* ignore */ } }
     const style = document.createElement('style');
     style.id = 'ldp-summary-appearance-style';
-    style.textContent = '.summary-window .video-summary-answer,.summary-window .media-summary-answer,.summary-window .text-ai-answer,.summary-window .ai-answer{font-size:var(--summary-font-size,14px)!important;line-height:1.72}.summary-window .video-summary-answer.streaming::after,.summary-window .media-summary-answer.streaming::after,.summary-window .text-ai-answer.streaming::after,.summary-window .ai-answer.streaming::after{content:"▋";display:inline-block;margin-left:3px;color:var(--accent);animation:ldp-stream-cursor .75s steps(1,end) infinite}.summary-window .video-summary-status.streaming::after,.summary-window .media-summary-status.streaming::after{content:"";display:inline-block;width:8px;height:8px;margin-left:6px;border:1.5px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);border-radius:50%;animation:ldp-status-spin .8s linear infinite;vertical-align:-1px}.ldp-stream-dots{display:inline-flex;gap:1px;margin-left:3px;color:var(--accent);vertical-align:bottom}.ldp-stream-dots[hidden]{display:none!important}.ldp-stream-dots i{font-style:normal;line-height:1;animation:ldp-dot-blink 1.2s infinite}.ldp-stream-dots i:nth-child(2){animation-delay:.2s}.ldp-stream-dots i:nth-child(3){animation-delay:.4s}.summary-window .video-summary-answer.streaming,.summary-window .media-summary-answer.streaming{min-height:24px}.summary-appearance{display:inline-flex;align-items:center;gap:5px;margin-left:auto;color:var(--muted);font-size:10px;white-space:nowrap}.summary-appearance-label{font-size:10px}.summary-appearance-btn{height:24px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font:11px/1 sans-serif;cursor:pointer}.summary-appearance-btn:hover{border-color:var(--accent);color:var(--accent)}.summary-opacity-range{width:64px;accent-color:var(--accent);height:14px}.summary-appearance-value{min-width:60px;font-variant-numeric:tabular-nums;text-align:right}@keyframes ldp-stream-cursor{0%,49%{opacity:1}50%,100%{opacity:.15}}@keyframes ldp-dot-blink{0%,70%,100%{opacity:.18}35%{opacity:1}}@keyframes ldp-status-spin{to{transform:rotate(360deg)}}';
+    style.textContent = '.summary-window .video-summary-answer,.summary-window .media-summary-answer,.summary-window .text-ai-answer,.summary-window .ai-answer{font-size:var(--summary-font-size,14px)!important;line-height:1.72}.ldp-stream-dots{display:inline-flex;gap:1px;margin-left:3px;color:var(--accent);vertical-align:bottom}.ldp-stream-dots[hidden]{display:none!important}.ldp-stream-dots i{font-style:normal;line-height:1;animation:ldp-dot-blink 1.2s infinite}.ldp-stream-dots i:nth-child(2){animation-delay:.2s}.ldp-stream-dots i:nth-child(3){animation-delay:.4s}.summary-window .video-summary-answer.streaming,.summary-window .media-summary-answer.streaming{min-height:24px}.summary-appearance{display:inline-flex;align-items:center;gap:5px;margin-left:auto;color:var(--muted);font-size:10px;white-space:nowrap}.summary-appearance-label{font-size:10px}.summary-appearance-btn{height:24px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font:11px/1 sans-serif;cursor:pointer}.summary-appearance-btn:hover{border-color:var(--accent);color:var(--accent)}.summary-opacity-range{width:64px;accent-color:var(--accent);height:14px}.summary-appearance-value{min-width:60px;font-variant-numeric:tabular-nums;text-align:right}@keyframes ldp-dot-blink{0%,70%,100%{opacity:.18}35%{opacity:1}}@keyframes ldp-status-spin{to{transform:rotate(360deg)}}';
     (root || document.head || document.documentElement).appendChild(style);
     summaryAppearanceStyle = style;
   }
@@ -13383,6 +13381,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
 })(); 
 })();
+
 
 
 

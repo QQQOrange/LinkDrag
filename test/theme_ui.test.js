@@ -21,3 +21,9 @@ test('explicit light/dark still wins over automatic sampling', () => {
   assert.match(source, /settings\.theme === 'light'\) return false/);
   assert.match(source, /settings\.theme === 'dark'\) return true/);
 });
+
+test('streaming status uses dots but has no blinking block cursor', () => {
+  assert.match(source, /ldp-stream-dots/);
+  assert.doesNotMatch(source, /▋/);
+  assert.doesNotMatch(source, /ldp-stream-cursor/);
+});
