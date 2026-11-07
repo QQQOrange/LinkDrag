@@ -64,6 +64,25 @@
       </section>
     </div>
 
+    <section class="card wide update-card">
+      <h2>扩展更新</h2>
+      <p class="muted">每次启动浏览器检查 GitHub 最新发布。只提示是否有新版，不会自动下载；点击更新会打开 GitHub 发布页。</p>
+      <label class="row"><span><b>启动时检查更新</b><small>浏览器启动后在后台检查，发现新版会发通知</small></span><input type="checkbox" id="updateEnabled"><i class="switch"></i></label>
+      <label class="block-label" for="updateToken">GitHub 个人访问令牌</label>
+      <div class="update-token-row">
+        <input type="password" id="updateToken" placeholder="github_pat_... 或 ghp_..." autocomplete="new-password">
+        <button type="button" id="clearUpdateToken">清除令牌</button>
+      </div>
+      <p class="hint">公开仓库可以不填；填写 GitHub Personal Access Token 可避免 API 限流。令牌只保存在本机 chrome.storage.local，不会注入网页。无需 repo 写权限，只需读取公开仓库。</p>
+      <div id="updateStatus" class="update-status">尚未检查</div>
+      <div class="update-actions">
+        <button type="button" class="primary" id="saveUpdate">保存更新设置</button>
+        <button type="button" id="checkUpdate">立即检测</button>
+        <button type="button" id="openUpdate" hidden>打开 GitHub 发布页</button>
+        <span id="updateState" class="save-state" role="status"></span>
+      </div>
+    </section>
+
     <section class="card wide ai-config">
       <h2>AI 页面助手</h2>
       <p class="muted">AI 不会自动发起请求。已预置 DeepSeek、硅基流动、通义千问、Kimi、OpenAI、Ollama 等服务商配置，通常只需要填写 API Key；也可以改成任意 OpenAI 兼容接口。只有点击网页/播放器旁的 AI 按钮、总结入口或追问后，才会把对应正文发送到你配置的接口。</p>

@@ -3,6 +3,7 @@
 const NAMESPACE = 'LPS_EXT';
 const SETTINGS_KEY = 'FOX_QQQORANGE_PREVIEW_140_SETTINGS';
 const AI_CONFIG_KEY = 'FOX_QQQORANGE_PREVIEW_140_AI';
+const UPDATE_CONFIG_KEY = 'LINKDRAG_UPDATE_CONFIG';
 const AI_PROVIDERS = [
   { id: 'deepseek', label: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat' },
   { id: 'siliconflow', label: '硅基流动', endpoint: 'https://api.siliconflow.cn/v1/chat/completions', model: 'deepseek-ai/DeepSeek-V3' },
@@ -65,6 +66,73 @@ function setState(id, text, tone) {
   const node = $(id);
   node.textContent = text || '';
   node.className = 'save-state' + (tone ? ' ' + tone : '');
+}
+
+function renderUpdateStatus(config, fallback) {
+  const node = $('updateStatus');
+  const open = $('openUpdate');
+  if (!node) return;
+  const c = config || {};
+  const current = chrome.runtime.getManifest().version;
+  const latest = String(c.latestVersion || '');
+  if (c.updateAvailable && latest) {
+    node.className = 'update-status good';
+    node.textContent = tr(`发现新版本 v${latest}（当前 v${current}）`, `New version v${latest} (current v${current})`);
+    if (open) {
+      open.hidden = false;
+      open.dataset.url = c.releaseUrl || 'https://github.com/QQQOrange/LinkDrag/releases';
+    }
+  } else if (c.lastError) {
+    node.className = 'update-status warn';
+    node.textContent = c.lastError;
+    if (open) open.hidden = true;
+  } else if (latest) {
+    node.className = 'update-status';
+    node.textContent = tr(`已是最新版本 v${current}`, `Up to date: v${current}`);
+    if (open) open.hidden = true;
+  } else {
+    node.className = 'update-status';
+    node.textContent = fallback || '尚未检查';
+    if (open) open.hidden = true;
+  }
+}
+
+async function saveUpdateConfig() {
+  const current = await storageGet(UPDATE_CONFIG_KEY);
+  const prev = current[UPDATE_CONFIG_KEY] && typeof current[UPDATE_CONFIG_KEY] === 'object' ? current[UPDATE_CONFIG_KEY] : {};
+  const tokenInput = $('updateToken');
+  const token = tokenInput.dataset.clear === '1' ? '' : tokenInput.value.trim();
+  await storageSet({
+    [UPDATE_CONFIG_KEY]: Object.assign({}, prev, {
+      enabled: $('updateEnabled').checked,
+      token
+    })
+  });
+  tokenInput.dataset.clear = '';
+  setState('updateState', tr('更新设置已保存。', 'Update settings saved.'), 'good');
+}
+
+async function checkUpdateNow() {
+  await saveUpdateConfig();
+  const state = $('updateState');
+  state.className = 'save-state';
+  state.textContent = tr('正在检查 GitHub 最新版本…', 'Checking GitHub for the latest release…');
+  const result = await sendBackground({ type: 'ldp:checkUpdate', force: true });
+  if (!result || !result.ok) {
+    renderUpdateStatus({ lastError: (result && result.lastError) || tr('检查失败，请检查网络或令牌。', 'Check failed. Verify your network or token.') });
+    setState('updateState', '', 'bad');
+    return;
+  }
+  const all = await storageGet(UPDATE_CONFIG_KEY);
+  const config = all[UPDATE_CONFIG_KEY] || result;
+  renderUpdateStatus(config);
+  if (config.lastError) {
+    setState('updateState', config.lastError, 'bad');
+    return;
+  }
+  setState('updateState', config.updateAvailable
+    ? tr('发现新版本；点击「打开 GitHub 发布页」自行下载。', 'A new version is available. Open the GitHub release page to download it.')
+    : tr('当前已是最新版本。', 'You are up to date.'), 'good');
 }
 
 function isSupported(url) {
@@ -139,6 +207,14 @@ async function load() {
   $('badgeCount').checked = s.badgeCount !== false;
   $('language').value = s.language === 'en' ? 'en' : 'zh-CN';
   $('disabledSites').value = String(s.disabledSites || '');
+
+  const updateAll = await storageGet(UPDATE_CONFIG_KEY);
+  const updateConfig = updateAll[UPDATE_CONFIG_KEY] && typeof updateAll[UPDATE_CONFIG_KEY] === 'object'
+    ? updateAll[UPDATE_CONFIG_KEY] : {};
+  $('updateEnabled').checked = updateConfig.enabled !== false;
+  $('updateToken').value = String(updateConfig.token || '');
+  $('updateToken').dataset.clear = '';
+  renderUpdateStatus(updateConfig);
 
   const aiAll = await storageGet(AI_CONFIG_KEY);
   const ai = aiAll[AI_CONFIG_KEY] && typeof aiAll[AI_CONFIG_KEY] === 'object' ? aiAll[AI_CONFIG_KEY] : {};
@@ -406,6 +482,19 @@ async function load() {
       return;
     }
     setState('aiState', '媒体 API Key 可用 · ' + Number(res.elapsed || 0).toFixed(1) + ' 秒', 'good');
+  });
+
+  $('saveUpdate').addEventListener('click', saveUpdateConfig);
+  $('checkUpdate').addEventListener('click', checkUpdateNow);
+  $('clearUpdateToken').addEventListener('click', () => {
+    $('updateToken').value = '';
+    $('updateToken').dataset.clear = '1';
+    setState('updateState', tr('已标记清除令牌；点击「保存更新设置」后生效。', 'Token will be cleared after saving.'), '');
+  });
+  $('updateToken').addEventListener('input', () => { $('updateToken').dataset.clear = ''; });
+  $('openUpdate').addEventListener('click', () => {
+    const url = $('openUpdate').dataset.url || 'https://github.com/QQQOrange/LinkDrag/releases';
+    chrome.tabs.create({ url });
   });
 
   $('language').addEventListener('change', () => {

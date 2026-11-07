@@ -15,6 +15,12 @@ const VERSION = chrome.runtime.getManifest().version;
 const NAMESPACE = 'LPS_EXT';
 const SETTINGS_KEY = 'FOX_QQQORANGE_PREVIEW_140_SETTINGS';
 const AI_CONFIG_KEY = 'FOX_QQQORANGE_PREVIEW_140_AI';
+const UPDATE_CONFIG_KEY = 'LINKDRAG_UPDATE_CONFIG';
+const UPDATE_REPO = 'QQQOrange/LinkDrag';
+const UPDATE_RELEASES_URL = `https://github.com/${UPDATE_REPO}/releases`;
+const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+const UPDATE_NOTIFY_COOLDOWN = 10 * 60 * 1000;
+let updateCheckPromise = null;
 const DEFAULT_AI_CONFIG = {
   provider: 'deepseek',
   endpoint: 'https://api.deepseek.com/v1/chat/completions',
@@ -61,6 +67,174 @@ async function getSettings() {
   const all = await storageGet(SETTINGS_KEY);
   const s = all[SETTINGS_KEY];
   return s && typeof s === 'object' && !Array.isArray(s) ? s : {};
+}
+
+/* ------------------------------------------------------------------------- */
+/* Update checker                                                             */
+/* ------------------------------------------------------------------------- */
+
+function normalizeUpdateConfig(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  return {
+    enabled: raw.enabled !== false,
+    token: String(raw.token || '').trim(),
+    lastCheck: Number(raw.lastCheck) || 0,
+    latestVersion: String(raw.latestVersion || '').replace(/^v/i, ''),
+    latestName: String(raw.latestName || ''),
+    releaseUrl: String(raw.releaseUrl || UPDATE_RELEASES_URL),
+    publishedAt: String(raw.publishedAt || ''),
+    lastError: String(raw.lastError || ''),
+    updateAvailable: raw.updateAvailable === true,
+    lastNotifiedAt: Number(raw.lastNotifiedAt) || 0,
+    lastNotifiedVersion: String(raw.lastNotifiedVersion || '')
+  };
+}
+
+function storageSetLocal(value) {
+  return new Promise(resolve => {
+    try {
+      chrome.storage.local.set(value, () => {
+        try { void chrome.runtime.lastError; } catch (e) { /* ignore */ }
+        resolve();
+      });
+    } catch (e) { resolve(); }
+  });
+}
+
+function versionParts(value) {
+  return String(value || '').replace(/^v/i, '').split('.').map(part => {
+    const match = String(part).match(/^\d+/);
+    return match ? Number(match[0]) : 0;
+  });
+}
+
+function compareVersions(a, b) {
+  const left = versionParts(a);
+  const right = versionParts(b);
+  const length = Math.max(left.length, right.length);
+  for (let i = 0; i < length; i++) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+async function readUpdateConfig() {
+  const all = await storageGet(UPDATE_CONFIG_KEY);
+  return normalizeUpdateConfig(all[UPDATE_CONFIG_KEY]);
+}
+
+function publicUpdateStatus(config) {
+  return {
+    ok: true,
+    enabled: config.enabled !== false,
+    hasToken: !!config.token,
+    currentVersion: VERSION,
+    latestVersion: config.latestVersion || '',
+    latestName: config.latestName || '',
+    releaseUrl: config.releaseUrl || UPDATE_RELEASES_URL,
+    publishedAt: config.publishedAt || '',
+    lastCheck: config.lastCheck || 0,
+    lastError: config.lastError || '',
+    updateAvailable: config.updateAvailable === true
+  };
+}
+
+function openUpdateRelease() {
+  return readUpdateConfig().then(config => {
+    const url = /^https:\/\/github\.com\/QQQOrange\/LinkDrag\/releases/i.test(config.releaseUrl)
+      ? config.releaseUrl
+      : UPDATE_RELEASES_URL;
+    try { chrome.tabs.create({ url }); } catch (e) { /* ignore */ }
+  });
+}
+
+async function checkForUpdate(force, manual) {
+  const config = await readUpdateConfig();
+  if (!config.enabled && !manual) return publicUpdateStatus(config);
+  if (!force && config.lastCheck && Date.now() - config.lastCheck < UPDATE_CHECK_INTERVAL) {
+    return publicUpdateStatus(config);
+  }
+  if (updateCheckPromise) return updateCheckPromise;
+  updateCheckPromise = (async () => {
+    const headers = {
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'LinkDrag/' + VERSION
+    };
+    if (config.token) headers.Authorization = 'Bearer ' + config.token;
+    let next = Object.assign({}, config, { lastCheck: Date.now() });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+        headers,
+        credentials: 'omit',
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        const detail = response.status === 401 || response.status === 403
+          ? 'GitHub 令牌无效或 API 限流（HTTP ' + response.status + '）'
+          : response.status === 404
+            ? '没有找到 LinkDrag 的 GitHub 发布页'
+            : 'GitHub 返回 HTTP ' + response.status;
+        next.lastError = detail;
+      } else {
+        const release = await response.json();
+        const latestVersion = String(release.tag_name || '').replace(/^v/i, '').trim();
+        if (!latestVersion) {
+          next.lastError = 'GitHub 发布信息缺少版本号';
+        } else {
+          const available = compareVersions(latestVersion, VERSION) > 0;
+          next = Object.assign(next, {
+            latestVersion,
+            latestName: String(release.name || release.tag_name || ''),
+            releaseUrl: String(release.html_url || (`https://github.com/${UPDATE_REPO}/releases/tag/${release.tag_name || latestVersion}`)),
+            publishedAt: String(release.published_at || ''),
+            lastError: '',
+            updateAvailable: available
+          });
+          if (!available) {
+            next.lastNotifiedVersion = '';
+            next.lastNotifiedAt = 0;
+          } else if (force || config.lastNotifiedVersion !== latestVersion || Date.now() - config.lastNotifiedAt > UPDATE_NOTIFY_COOLDOWN) {
+            next.lastNotifiedVersion = latestVersion;
+            next.lastNotifiedAt = Date.now();
+            try {
+              if (chrome.notifications && chrome.notifications.create) {
+                const uiSettings = await getSettings();
+                const english = uiSettings.language === 'en';
+                chrome.notifications.create('linkdrag-update-' + latestVersion, {
+                  type: 'basic',
+                  iconUrl: chrome.runtime.getURL('icons/128.png'),
+                  title: english ? 'LinkDrag update available' : 'LinkDrag 有新版本',
+                  message: english
+                    ? `Current v${VERSION}, latest v${latestVersion}. Click to open the GitHub release page.`
+                    : `当前 v${VERSION}，最新 v${latestVersion}。点击查看 GitHub 发布页。`,
+                  buttons: [{ title: english ? 'View update' : '查看更新' }],
+                  priority: 2
+                });
+              }
+            } catch (e) { /* notifications may be disabled */ }
+          }
+        }
+      }
+    } catch (e) {
+      next.lastError = '检查更新失败：' + (e && e.message ? String(e.message).slice(0, 160) : '网络错误');
+    } finally {
+      clearTimeout(timer);
+    }
+    await storageSetLocal({ [UPDATE_CONFIG_KEY]: next });
+    return publicUpdateStatus(normalizeUpdateConfig(next));
+  })().finally(() => { updateCheckPromise = null; });
+  return updateCheckPromise;
+}
+
+function scheduleUpdateCheck(reason) {
+  setTimeout(() => {
+    checkForUpdate(reason === 'startup').catch(() => {});
+  }, reason === 'startup' ? 2500 : 6000);
 }
 
 function isHttpUrl(value) {
@@ -1337,6 +1511,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (type === 'ldp:getUpdateStatus') {
+    readUpdateConfig().then(config => sendResponse(publicUpdateStatus(config)), () => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (type === 'ldp:checkUpdate') {
+    checkForUpdate(message.force === true, message.force === true).then(sendResponse, () => sendResponse({ ok: false, reason: 'network' }));
+    return true;
+  }
+
+  if (type === 'ldp:openUpdate') {
+    openUpdateRelease().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (type === 'ldp:resolveDouyin') {
     resolveDouyinShare(message.url).then(sendResponse, () => sendResponse({ ok: false, reason: 'network' }));
     return true;
@@ -1558,11 +1747,29 @@ chrome.commands.onCommand.addListener(async command => {
 
 chrome.runtime.onInstalled.addListener(() => {
   scheduleMenuRebuild();
+  scheduleUpdateCheck('installed');
 });
 
 chrome.runtime.onStartup.addListener(() => {
   scheduleMenuRebuild();
+  // The user asked for one check each time the browser starts.  GitHub API
+  // throttling is avoided by the persisted lastCheck guard for worker restarts.
+  scheduleUpdateCheck('startup');
 });
+
+if (chrome.notifications && chrome.notifications.onClicked) {
+  const handleUpdateNotification = id => {
+    if (!String(id || '').startsWith('linkdrag-update-')) return;
+    try { chrome.notifications.clear(id); } catch (e) { /* ignore */ }
+    openUpdateRelease();
+  };
+  chrome.notifications.onClicked.addListener(handleUpdateNotification);
+  if (chrome.notifications.onButtonClicked) {
+    chrome.notifications.onButtonClicked.addListener((id, buttonIndex) => {
+      if (buttonIndex === 0) handleUpdateNotification(id);
+    });
+  }
+}
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
@@ -1595,4 +1802,6 @@ chrome.tabs.onRemoved.addListener(tabId => {
 // Create menus on worker startup as well.  onInstalled/onStartup do not fire
 // when the service worker is woken by a message after the browser restarted.
 scheduleMenuRebuild();
+// Worker wake-up fallback: no network call if the six-hour guard is fresh.
+scheduleUpdateCheck('worker');
 

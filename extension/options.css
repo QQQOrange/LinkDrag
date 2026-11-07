@@ -75,6 +75,14 @@ button.primary:hover { filter: brightness(1.06); }
 textarea { width: 100%; min-height: 78px; resize: vertical; border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; color: var(--text); background: color-mix(in srgb, var(--card-solid) 84%, transparent); outline: none; line-height: 1.6; }
 textarea:focus { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft); }
 .hint { color: var(--muted); font-size: 11px; margin: 5px 0 0; }
+.update-card { border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
+.update-token-row { display: flex; align-items: center; gap: 8px; }
+.update-token-row input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--card-solid) 84%, transparent); color: var(--text); outline: none; font: 12.5px/1.5 inherit; }
+.update-token-row input:focus { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.update-status { margin-top: 13px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--accent) 5%, var(--card-solid)); color: var(--muted); font-size: 12px; }
+.update-status.good { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 28%, var(--line)); }
+.update-status.warn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 28%, var(--line)); }
+.update-actions { display: flex; align-items: center; gap: 9px; margin-top: 10px; flex-wrap: wrap; }
 .ai-config { border-color: color-mix(in srgb, var(--accent-2) 24%, var(--line)); }
 .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
 .ai-field { display: flex; flex-direction: column; gap: 6px; color: var(--text); font-size: 12.5px; font-weight: 600; }

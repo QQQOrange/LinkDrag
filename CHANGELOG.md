@@ -1,5 +1,13 @@
 # 变更记录
 
+## v1.1.0 — GitHub 更新检测（2026-11-07）
+
+- 浏览器启动时检查 GitHub 最新 Release，发现新版时发送通知并显示工具栏弹窗更新横幅。
+- 只提示，不自动下载；通知、横幅和选项页按钮只打开 GitHub Release 页面。
+- 选项页新增「扩展更新」：启用/关闭启动检查、GitHub Personal Access Token、立即检测、状态和发布页链接。
+- Token 只保存在本机 `chrome.storage.local`，不会注入网页；公开仓库可留空。
+- 新增 `notifications` 权限和 `test/update_checker.test.js`。
+
 ## v1.0.10 — 后台克隆等待 MSE 元数据（2026-11-07）
 
 - 离屏克隆播放器的元数据等待从 3.5 秒放宽到 8 秒，给 MediaSource 初始化/首个分片更多时间。

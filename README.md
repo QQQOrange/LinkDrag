@@ -1,8 +1,8 @@
-﻿# LinkDrag
+# LinkDrag
 
-**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.0.10**.
+**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.1.0**.
 
-**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.0.10**。
+**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.1.0**。
 
 <p>
   <a href="#中文">简体中文</a> ·
@@ -63,7 +63,7 @@
 
 #### 从 ZIP 安装（开发版）
 
-1. 下载 `dist/LinkDrag-v1.0.10.zip` 并解压。
+1. 下载 `dist/LinkDrag-v1.1.0.zip` 并解压。
 2. 打开 `edge://extensions` 或 `chrome://extensions`。
 3. 开启右上角「开发人员模式」。
 4. 点击「加载解压缩的扩展」，选择解压后的 `LinkDrag` 文件夹。
@@ -101,6 +101,13 @@
 
 只有点击 AI 按钮、总结入口或追问时，才会向配置的接口发送对应正文/音频转写文本。API Key 不会注入页面 DOM。
 
+### 更新检测
+
+- 浏览器启动时自动检查 GitHub 最新 Release；发现新版时发送桌面通知，并在工具栏弹窗显示更新横幅。
+- 只提示版本差异，**不会自动下载或安装**。点击通知、弹窗横幅或选项页按钮只会打开 GitHub Release 页面。
+- 在「选项与诊断 → 扩展更新」中可填写 GitHub Personal Access Token。令牌只保存在本机 `chrome.storage.local`，不会注入网页；公开仓库可留空，填写令牌主要用于避免 GitHub API 限流。
+- 可关闭自动检查，或随时点击「立即检测」。
+
 ### 语言
 
 - 默认：**简体中文**
@@ -120,6 +127,7 @@
 - `downloads`：下载视频、音频和 SRT 字幕。
 - `declarativeNetRequest`：仅对受支持的媒体 CDN 补充必要请求头，不修改页面响应。
 - `webRequest`：只观察当前标签页的媒体请求 URL，用于找到抖音等站点的真实视频/音频地址；不读取账号密码，不修改请求内容。
+- `notifications`：发现 LinkDrag 新版本时发送桌面通知；不会自动下载更新。
 - `<all_urls>`：在普通网页中注入预览和总结能力。
 
 API Key 保存在本机 `chrome.storage.local`。扩展不会自动上传浏览历史；只有你主动触发 AI 总结时才会发送对应内容到你自己配置的接口。
@@ -175,7 +183,7 @@ LinkDrag/
 
 ### 版本
 
-**v1.0.10** — 首个 LinkDrag 正式版本。
+**v1.1.0** — 首个 LinkDrag 正式版本。
 
 ---
 
@@ -231,7 +239,7 @@ LinkDrag/
 
 #### Install from ZIP (development build)
 
-1. Download and extract `dist/LinkDrag-v1.0.10.zip`.
+1. Download and extract `dist/LinkDrag-v1.1.0.zip`.
 2. Open `edge://extensions` or `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the extracted `LinkDrag` folder.
@@ -269,6 +277,13 @@ Open **Options & diagnostics** or **In-page settings**:
 
 Text/audio is sent only when you explicitly click an AI button, summary entry point or follow-up. API keys are never injected into page DOM.
 
+### Update checks
+
+- At browser startup, LinkDrag checks GitHub for the latest Release. When a newer version exists it shows a desktop notification and an update banner in the toolbar popup.
+- It only reports the version difference and **never downloads or installs automatically**. Clicking the notification, popup banner or options button only opens the GitHub Release page.
+- In **Options & diagnostics → Extension updates** you can add a GitHub personal access token. The token stays in local `chrome.storage.local`, is never injected into pages, and is optional for the public repository (mainly useful to avoid GitHub API rate limits).
+- Automatic checks can be disabled, and **Check now** is always available.
+
 ### Language
 
 - Default: **Simplified Chinese (zh-CN)**
@@ -286,6 +301,7 @@ Text/audio is sent only when you explicitly click an AI button, summary entry po
 - `downloads`: download video, audio and SRT subtitles.
 - `declarativeNetRequest`: add only required headers for supported media CDNs; page responses are not modified.
 - `webRequest`: observe media request URLs in the current tab to discover real video/audio URLs (for example Douyin). It does not read credentials or alter request bodies.
+- `notifications`: show a desktop notification when a newer LinkDrag release exists; updates are never downloaded automatically.
 - `<all_urls>`: enable previews and summaries on normal webpages.
 
 API keys remain in local `chrome.storage.local`. LinkDrag does not automatically upload browsing history; content is sent only when you explicitly start an AI action and only to the endpoint you configured.
@@ -318,13 +334,14 @@ powershell -ExecutionPolicy Bypass -File .\打包ZIP.ps1
 
 ### Version
 
-**v1.0.10** — first official LinkDrag release.
+**v1.1.0** — first official LinkDrag release.
 
 ---
 
 ## License / 许可
 
 This repository is provided as-is for personal and educational use. Third-party service names and trademarks belong to their respective owners. Media-discovery research references [cshuangyy/videdown](https://github.com/cshuangyy/videdown) (MIT); no yt-dlp binary is bundled. / 本项目按现状提供，供个人与学习用途；第三方服务名称与商标归各自所有者。媒体解析思路参考 [cshuangyy/videdown](https://github.com/cshuangyy/videdown)（MIT）；本项目不捆绑 yt-dlp 二进制。
+
 
 
 

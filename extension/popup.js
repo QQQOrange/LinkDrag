@@ -206,6 +206,21 @@ async function loadHistory() {
   }
 }
 
+async function loadUpdateBanner() {
+  if (!ui.updateBanner) return;
+  const status = await sendBackground({ type: 'ldp:getUpdateStatus' });
+  if (!status || !status.ok || !status.updateAvailable || !status.latestVersion) {
+    ui.updateBanner.hidden = true;
+    return;
+  }
+  ui.updateVersion.textContent = `v${status.latestVersion}（当前 v${status.currentVersion}）`;
+  ui.updateBanner.hidden = false;
+  ui.openUpdate.onclick = async () => {
+    await sendBackground({ type: 'ldp:openUpdate' });
+    window.close();
+  };
+}
+
 async function ensureAndReadStatus() {
   const injected = await sendBackground({ type: 'ldp:ensureContent', tabId: activeTab.id });
   contentReady = !!(injected && injected.ok);
@@ -244,9 +259,13 @@ async function init() {
   ui.historyList = $('historyList');
   ui.historyEmpty = $('historyEmpty');
   ui.message = $('message');
+  ui.updateBanner = $('updateBanner');
+  ui.updateVersion = $('updateVersion');
+  ui.openUpdate = $('openUpdate');
 
   ui.version.textContent = 'v' + chrome.runtime.getManifest().version;
   ui.footerOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  loadUpdateBanner();
 
   const tabResponse = await sendBackground({ type: 'ldp:getActiveTab' });
   activeTab = tabResponse && tabResponse.tab;
