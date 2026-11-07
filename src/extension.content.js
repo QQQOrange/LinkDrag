@@ -9830,6 +9830,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const item = openWindow('', title, null, point, { bare: true });
     if (!item) return;
     item.summaryProtected = true;
+    item.anchorVideo = video;
     item.videoState = {
       busy: false,
       answer: '',
@@ -9920,6 +9921,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       subtitleError: String(subtitleError || ''),
       textMode: false,
       list: candidates.length ? candidates : [{ element: video, url: src, kind: 'video', srcKind, duration: Number(video.duration) || 0, title: info.title || '' }],
+      anchorVideo: video,
       candidate: null,
       prompt: ''
     };
@@ -9937,9 +9939,13 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (state.busy) return;
     if (!state.info) state.info = {};
     if (!state.info.video || !state.info.video.isConnected) {
-      const candidate = scanMediaCandidates().find(entry => entry.element && String(entry.element.tagName || '').toUpperCase() === 'VIDEO' && entry.element.isConnected);
-      state.info.video = candidate ? candidate.element : findActiveVideoElement();
+      // Preserve the player that was clicked; only then use the active player.
+      // Never take the first <video> in the document (recommendation feeds
+      // keep preloaded previous clips in DOM order).
+      if (item.anchorVideo && item.anchorVideo.isConnected) state.info.video = item.anchorVideo;
+      else state.info.video = findActiveVideoElement();
     }
+    if (state.info.video && state.info.video.isConnected) item.anchorVideo = state.info.video;
     if (!state.info.video) {
       if (typeof revealSummaryWindow === 'function') revealSummaryWindow(item);
       return;
@@ -11017,47 +11023,75 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
   }
 
-  function currentDouyinAwemeId() {
+  function awemeIdFromVideo(video) {
+    if (!video) return '';
+    let node = video;
+    for (let depth = 0; node && depth < 9; depth++, node = node.parentElement) {
+      for (const attr of ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id']) {
+        const value = node.getAttribute && node.getAttribute(attr);
+        if (value && /^\d{10,}$/.test(String(value))) return String(value);
+      }
+      try {
+        const outer = String(node.outerHTML || '');
+        const opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));
+        const match = opening.match(/(?:aweme[_-]?id|video[_-]?id)["'\s:=]+(\d{10,})/i);
+        if (match) return match[1];
+      } catch (e) { /* ignore */ }
+    }
+    return '';
+  }
+
+  function currentDouyinAwemeId(anchorVideo) {
+    // The clicked player is the strongest signal.  Recommendation feeds keep
+    // the URL and page data on the previous clip, so never let them win over
+    // the exact <video> the user pressed.
+    const fromAnchor = awemeIdFromVideo(anchorVideo);
+    if (fromAnchor) return fromAnchor;
+    // When an anchor player was supplied, do not fall back to the URL: the
+    // recommendation feed often leaves the previous clip's /video/{id} in the
+    // address bar.  Let the MAIN-world hook resolve the current node instead.
+    if (anchorVideo) return '';
     try {
       const fromUrl = location.pathname.match(/\/video\/(\d+)/) || location.search.match(/[?&](?:modal_id|aweme_id)=(\d+)/);
       if (fromUrl) return fromUrl[1];
     } catch (e) { /* ignore */ }
     const videos = Array.from(document.querySelectorAll('video')).sort((a, b) => videoActivityScore(b) - videoActivityScore(a));
     for (const video of videos) {
-      let node = video;
-      for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
-        for (const attr of ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id']) {
-          const value = node.getAttribute && node.getAttribute(attr);
-          if (value && /^\d{10,}$/.test(String(value))) return String(value);
-        }
-        try {
-          const match = String(node.outerHTML || '').match(/(?:aweme[_-]?id|video[_-]?id)["'\s:=]+(\d{10,})/i);
-          if (match) return match[1];
-        } catch (e) { /* ignore */ }
-      }
+      const id = awemeIdFromVideo(video);
+      if (id) return id;
     }
     return '';
   }
 
-  function requestDouyinDetail(preferredAwemeId) {
+  function requestDouyinDetail(preferredAwemeId, anchorVideo) {
     return new Promise(resolve => {
       if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname)) { resolve(null); return; }
       let settled = false;
       const id = 'dy-detail-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      let markedAnchor = false;
       const finish = value => {
         if (settled) return;
         settled = true;
+        try {
+          if (markedAnchor && anchorVideo) anchorVideo.removeAttribute('data-lps-current-video');
+        } catch (e) { /* ignore */ }
         window.removeEventListener('message', onMessage);
         clearTimeout(timer);
         resolve(value || null);
       };
       const onMessage = event => {
         if (event.source !== window || !event.data || event.data.source !== 'LPS_DOUYIN_DETAIL_RESULT' || event.data.id !== id) return;
-        finish(event.data.ok ? { audio: event.data.audio || [], video: event.data.video || [], title: event.data.title || '', awemeId: event.data.awemeId || '' } : null);
+        finish(event.data.ok ? { audio: event.data.audio || [], video: event.data.video || [], title: event.data.title || '', awemeId: event.data.awemeId || '', duration: Number(event.data.duration) || 0 } : null);
       };
       const timer = setTimeout(() => finish(null), 9000);
       window.addEventListener('message', onMessage);
-      try { window.postMessage({ source: 'LPS_DOUYIN_DETAIL', id, awemeId: preferredAwemeId || currentDouyinAwemeId() }, '*'); } catch (e) { finish(null); }
+      try {
+        if (anchorVideo && anchorVideo.setAttribute) {
+          anchorVideo.setAttribute('data-lps-current-video', '1');
+          markedAnchor = true;
+        }
+        window.postMessage({ source: 'LPS_DOUYIN_DETAIL', id, awemeId: preferredAwemeId || '' }, '*');
+      } catch (e) { finish(null); }
     });
   }
 
@@ -12701,6 +12735,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       error: '',
       textMode: !candidates.length,
       list: candidates,
+      anchorVideo: opts.video || findActiveVideoElement(),
       candidate: candidates[0] || null,
       prompt: ''
     };
@@ -12761,7 +12796,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       const rect = video.getBoundingClientRect();
       return rect && rect.width >= 160 && rect.height >= 40 && rect.bottom > 0 && rect.top < window.innerHeight;
     });
-    const videoElement = candidateVideo ? candidateVideo.element : domVideo;
+    const videoElement = findActiveVideoElement() || (candidateVideo ? candidateVideo.element : domVideo);
     if (videoElement) {
       // Always probe subtitles first.  If none are available, the video panel
       // switches to the audio/video media path automatically.
@@ -13012,8 +13047,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const list = (state && state.list) || [];
     if (/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
       // The recommendation feed can keep several preloaded <video> nodes.
-      // Prefer the node that is actually playing/visible instead of the first
-      // direct URL scraped from page data, which may belong to another clip.
+      // The exact node clicked by the user is authoritative; only then fall
+      // back to the highest-scoring active node.
+      const authoritative = list.find(candidate => candidate.authoritative && candidate.url && !/^blob:/i.test(candidate.url));
+      if (authoritative) return authoritative;
+      const anchor = state && state.anchorVideo && state.anchorVideo.isConnected ? state.anchorVideo : null;
+      if (anchor) {
+        const exact = list.find(candidate => candidate.element === anchor);
+        if (exact) return exact;
+      }
       const activeVideo = list
         .filter(candidate => candidate.kind === 'video' && candidate.element)
         .sort((a, b) => videoActivityScore(b.element) - videoActivityScore(a.element))[0];
@@ -13041,6 +13083,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     state.transcriptDuration = 0;
     state.startedAt = Date.now();
     state.summaryResourcesCleared = false;
+    const anchorVideo = state.anchorVideo && state.anchorVideo.isConnected
+      ? state.anchorVideo
+      : (item.anchorVideo && item.anchorVideo.isConnected ? item.anchorVideo : null);
+    if (anchorVideo) state.anchorVideo = anchorVideo;
     updateSummarySubtitleButton(item);
     if (typeof markSummaryStep === 'function') markSummaryStep(item, 'media', 0, 'active');
     if (/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
@@ -13051,25 +13097,40 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (fresh.length) { state.list = fresh; state.textMode = false; }
     }
     if (!state.list || !state.list.length) state.list = scanMediaCandidates();
-    if (/douyin\.com|iesdouyin\.com/i.test(location.hostname) && !state.list.some(candidate => candidate.url && !/^blob:/i.test(candidate.url))) {
-      updateSummaryLoading(item, 14, '正在解析抖音视频地址…');
+    const anchorCandidate = anchorVideo
+      ? state.list.find(candidate => candidate.element === anchorVideo)
+      : null;
+    const douyinNeedsResolve = /douyin\.com|iesdouyin\.com/i.test(location.hostname)
+      && (!anchorCandidate || !anchorCandidate.url
+        || /^blob:/i.test(anchorCandidate.url)
+        || anchorCandidate.srcKind === 'blob'
+        || anchorCandidate.srcKind === 'stream');
+    if (douyinNeedsResolve) {
+      updateSummaryLoading(item, 14, '正在解析当前抖音视频地址…');
       // Prefer the detail API's complete MP4 first.  `music.play_url` is
       // background music, and a single captured .m4s segment is not a complete
       // audio source, so neither may outrank the API result.
-      const resolveId = currentDouyinAwemeId();
-      const resolved = await requestDouyinResolve(resolveId ? 'https://www.douyin.com/video/' + resolveId : location.href);
-      if (resolved && resolved.url) {
-        state.list.unshift({ element: null, kind: /audio|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg/i.test(resolved.url) ? 'audio' : 'video', url: resolved.url, srcKind: 'direct', duration: Number(resolved.duration) || 0, title: resolved.title || document.title || '', visible: true });
+      const resolveId = currentDouyinAwemeId(anchorVideo);
+      const canResolveById = !!resolveId || /\/video\/\d+|(?:modal_id|aweme_id)=\d+/i.test(location.href);
+      const resolved = canResolveById
+        ? await requestDouyinResolve(resolveId ? 'https://www.douyin.com/video/' + resolveId : location.href)
+        : null;
+      const anchorDuration = Number(anchorVideo && anchorVideo.duration) || 0;
+      const resolvedDuration = Number(resolved && resolved.duration) || 0;
+      const resolvedMatches = !!resolved && !!resolved.url
+        && (!anchorDuration || !resolvedDuration || Math.abs(resolvedDuration - anchorDuration) < 3);
+      if (resolvedMatches) {
+        state.list.unshift({ element: anchorVideo || null, kind: /audio|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg/i.test(resolved.url) ? 'audio' : 'video', url: resolved.url, srcKind: 'direct', duration: Number(resolved.duration) || 0, title: resolved.title || document.title || '', visible: true, authoritative: true });
         state.textMode = false;
-      } else {
+      } else if (!anchorCandidate || !anchorCandidate.url) {
         const douyinVideo = resolveDouyinMediaUrl();
         if (douyinVideo) {
-          state.list.unshift({ element: null, kind: 'video', url: douyinVideo, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
+          state.list.unshift({ element: anchorVideo || null, kind: 'video', url: douyinVideo, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
           state.textMode = false;
         } else {
           const douyinAudio = resolveDouyinAudioUrl();
           if (douyinAudio) {
-            state.list.unshift({ element: null, kind: 'audio', url: douyinAudio, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
+            state.list.unshift({ element: anchorVideo || null, kind: 'audio', url: douyinAudio, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
             state.textMode = false;
           }
         }
@@ -13131,13 +13192,17 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (item.ui && item.ui.mediaAudioDownload) item.ui.mediaAudioDownload.hidden = true;
     if (/douyin\.com/i.test(location.hostname) && (!candidate.url || candidate.srcKind === 'blob' || candidate.srcKind === 'stream')) {
       updateSummaryLoading(item, 16, '正在读取抖音详情并优先解析音频…');
-      const currentId = currentDouyinAwemeId();
-      const detail = await requestDouyinDetail(currentId);
+      const currentId = currentDouyinAwemeId(anchorVideo);
+      const detail = await requestDouyinDetail(currentId, anchorVideo);
       // A Douyin detail response's `music.play_url` is usually the background
       // music, not the spoken audio.  Prefer the real video stream and extract
       // its audio locally; only fall back to the music URL when no video URL
       // exists at all.  Ignore a response for another aweme id.
-      const detailMatches = !currentId || !detail || !detail.awemeId || String(detail.awemeId) === String(currentId);
+      const mediaDuration = Number(candidate.duration) || Number(anchorVideo && anchorVideo.duration) || 0;
+      const detailDuration = Number(detail && detail.duration) || 0;
+      const durationMatches = !mediaDuration || !detailDuration || Math.abs(detailDuration / 1000 - mediaDuration) < 3;
+      const detailMatches = (!currentId || !detail || !detail.awemeId || String(detail.awemeId) === String(currentId))
+        && durationMatches;
       if (detail && detailMatches && detail.video && detail.video.length) {
         candidate.url = detail.video[0];
         candidate.srcKind = 'direct';

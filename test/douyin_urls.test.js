@@ -60,3 +60,24 @@ test('Douyin candidate selection prefers a playing video over background music',
   const video = { kind: 'video', url: 'blob:https://www.douyin.com/abc', element };
   assert.equal(api.selectMediaCandidate({ list: [audio, video] }), video);
 });
+
+test('Douyin candidate selection binds the exact clicked player', () => {
+  const anchor = {
+    isConnected: true, paused: true, currentTime: 0, readyState: 2, videoWidth: 720,
+    getBoundingClientRect: () => ({ width: 720, height: 1280, top: 0, bottom: 800 })
+  };
+  const old = {
+    isConnected: true, paused: false, currentTime: 4, readyState: 4, videoWidth: 1080,
+    getBoundingClientRect: () => ({ width: 1080, height: 1920, top: 0, bottom: 800 })
+  };
+  const anchorCandidate = { kind: 'video', url: 'blob:https://www.douyin.com/current', element: anchor };
+  const oldCandidate = { kind: 'video', url: 'https://cdn.example/previous.mp4', element: old };
+  assert.equal(api.selectMediaCandidate({ list: [oldCandidate, anchorCandidate], anchorVideo: anchor }), anchorCandidate);
+});
+
+test('Douyin ID lookup is anchored to the clicked player', () => {
+  assert.match(source, /currentDouyinAwemeId\(anchorVideo\)/);
+  assert.match(source, /awemeIdFromVideo\(anchorVideo\)/);
+  assert.match(source, /candidate\.element === anchor/);
+  assert.match(source, /data-lps-current-video/);
+});

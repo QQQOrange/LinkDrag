@@ -588,7 +588,7 @@ async function resolveDouyinApi(videoId) {
     urls: urls.map(item => item.url),
     title: String(detail.desc || '').trim(),
     videoId: String(detail.aweme_id || videoId),
-    duration: Number(video.duration) || 0
+    duration: Math.round((Number(video.duration) || 0) / 1000)
   };
 }
 
