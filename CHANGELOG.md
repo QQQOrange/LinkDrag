@@ -1,5 +1,11 @@
 # 变更记录
 
+## v1.1.7 — 抖音 MSE 分片归属与时长兼容（2026-11-08）
+
+- MSE hook 在 `URL.createObjectURL(MediaSource)` 阶段就绑定 MediaSource owner，确保按当前 `<video>` 的 blob URL 精确取分片。
+- 详情接口的时长同时兼容秒和毫秒，避免命中有效 `play_addr` 后被错误的时长校验丢弃。
+- 继续保留 React/DOM ID 提取、移动端 iteminfo、后台克隆和本地 MSE 解码兜底。
+
 ## v1.1.6 — 抖音 MSE 音轨抓取兜底（2026-11-08）
 
 - MAIN-world hook 拦截 `MediaSource.addSourceBuffer` / `SourceBuffer.appendBuffer`，缓存当前播放器的带音频 MSE 分片。

@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.1.6
+/* LinkDrag — Chromium extension v1.1.7
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.1.6 and writes extension/content.js.
+ * manifest version into 1.1.7 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.1.6'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.1.6', name: '' }; }
+      return { version: String(m.version || '1.1.7'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.1.7', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -330,7 +330,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.1.6';
+    return '1.1.7';
   })();
 
   const TOP = window.self === window.top;
@@ -13467,7 +13467,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       // exists at all.  Ignore a response for another aweme id.
       const mediaDuration = Number(candidate.duration) || Number(anchorVideo && anchorVideo.duration) || 0;
       const detailDuration = Number(detail && detail.duration) || 0;
-      const durationMatches = !mediaDuration || !detailDuration || Math.abs(detailDuration / 1000 - mediaDuration) < 3;
+      // The detail hook returns Douyin's millisecond field, while a fallback
+      // resolver may return seconds.  Normalize both before comparing.
+      const detailDurationSeconds = detailDuration > 1000 ? detailDuration / 1000 : detailDuration;
+      const durationMatches = !mediaDuration || !detailDuration || Math.abs(detailDurationSeconds - mediaDuration) < 3;
       const detailMatches = (!currentId || !detail || !detail.awemeId || String(detail.awemeId) === String(currentId))
         && durationMatches;
       if (detail && detailMatches && detail.video && detail.video.length) {

@@ -82,7 +82,12 @@
           URL.createObjectURL = function (object) {
             var url = originalCreateObjectURL.apply(this, arguments);
             try {
-              if (object && object.__lpsMseOwner) mseBlobOwners[String(url)] = object.__lpsMseOwner;
+              if (object && typeof MediaSource !== 'undefined' && object instanceof MediaSource) {
+                if (!object.__lpsMseOwner) object.__lpsMseOwner = ++mseSourceSeq;
+                mseBlobOwners[String(url)] = object.__lpsMseOwner;
+              } else if (object && object.__lpsMseOwner) {
+                mseBlobOwners[String(url)] = object.__lpsMseOwner;
+              }
             } catch (e) { /* ignore */ }
             return url;
           };

@@ -13467,7 +13467,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       // exists at all.  Ignore a response for another aweme id.
       const mediaDuration = Number(candidate.duration) || Number(anchorVideo && anchorVideo.duration) || 0;
       const detailDuration = Number(detail && detail.duration) || 0;
-      const durationMatches = !mediaDuration || !detailDuration || Math.abs(detailDuration / 1000 - mediaDuration) < 3;
+      // The detail hook returns Douyin's millisecond field, while a fallback
+      // resolver may return seconds.  Normalize both before comparing.
+      const detailDurationSeconds = detailDuration > 1000 ? detailDuration / 1000 : detailDuration;
+      const durationMatches = !mediaDuration || !detailDuration || Math.abs(detailDurationSeconds - mediaDuration) < 3;
       const detailMatches = (!currentId || !detail || !detail.awemeId || String(detail.awemeId) === String(currentId))
         && durationMatches;
       if (detail && detailMatches && detail.video && detail.video.length) {
