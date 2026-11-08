@@ -835,6 +835,46 @@ async function resolveDouyinApi(videoId) {
   };
 }
 
+async function resolveDouyinItemInfo(videoId) {
+  const id = String(videoId || '');
+  if (!/^\d{10,}$/.test(id)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+  try {
+    const res = await fetch(`https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids=${encodeURIComponent(id)}`, {
+      credentials: 'include',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        'Referer': 'https://www.iesdouyin.com/',
+        'Accept': 'application/json, text/plain, */*'
+      }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const item = data && Array.isArray(data.item_list) ? data.item_list[0] : null;
+    const video = item && item.video;
+    if (!video) return null;
+    const urls = [];
+    collectDouyinApiUrls(video.bit_rate || [], urls, 0);
+    collectDouyinApiUrls(video, urls, 0);
+    urls.sort((a, b) => (b.height || 0) - (a.height || 0));
+    if (!urls.length) return null;
+    return {
+      ok: true,
+      url: urls[0].url,
+      urls: urls.map(item => item.url),
+      title: String(item.desc || '').trim(),
+      videoId: String(item.aweme_id || id),
+      duration: Math.round((Number(video.duration) || 0) / 1000)
+    };
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function resolveKuaishou(input) {
   const source = String(input || '').trim();
   if (!/^https?:\/\//i.test(source)) return { ok: false, reason: 'invalid-url' };
@@ -895,6 +935,10 @@ async function resolveDouyinShare(input) {
         const apiResult = await resolveDouyinApi(directId[1]);
         if (apiResult && apiResult.url) return apiResult;
       } catch (e) { /* fall through */ }
+      try {
+        const itemResult = await resolveDouyinItemInfo(directId[1]);
+        if (itemResult && itemResult.url) return itemResult;
+      } catch (e) { /* fall through */ }
     }
     const shortRes = await fetch(source, { redirect: 'follow', headers: { 'User-Agent': mobileUA } });
     const finalUrl = shortRes.url || source;
@@ -906,6 +950,10 @@ async function resolveDouyinShare(input) {
       try {
         const apiResult = await resolveDouyinApi(idMatch[1]);
         if (apiResult && apiResult.url) return apiResult;
+      } catch (e) { /* share-page fallback below */ }
+      try {
+        const itemResult = await resolveDouyinItemInfo(idMatch[1]);
+        if (itemResult && itemResult.url) return itemResult;
       } catch (e) { /* share-page fallback below */ }
     }
     const pageUrl = 'https://www.iesdouyin.com/share/video/' + idMatch[1];

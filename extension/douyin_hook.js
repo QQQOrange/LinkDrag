@@ -7,6 +7,11 @@
   window.__LPS_DOUYIN_MEDIA_HOOK__ = true;
   var seen = Object.create(null);
   var lastApiAwemeId = '';
+  var mseChunks = [];
+  var mseBytes = 0;
+  var mseSourceSeq = 0;
+  var mseBlobOwners = Object.create(null);
+  var MSE_MAX_BYTES = 72 * 1024 * 1024;
   function cleanUrl(value) {
     return String(value || '').replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/gi, '&');
   }
@@ -40,9 +45,93 @@
     }
   }
   window.addEventListener('message', function (event) {
-    if (event.source !== window || !event.data || event.data.source !== 'LPS_DOUYIN_MEDIA_CLEAR') return;
-    seen = Object.create(null);
+    if (event.source !== window || !event.data) return;
+    if (event.data.source === 'LPS_DOUYIN_MEDIA_CLEAR') {
+      seen = Object.create(null);
+      return;
+    }
+    if (event.data.source === 'LPS_DOUYIN_MSE_REQUEST') {
+      var requestId = event.data.id || '';
+      var requestedOwner = mseBlobOwners[String(event.data.blobUrl || '')] || 0;
+      var selected = requestedOwner
+        ? mseChunks.filter(function (chunk) { return chunk.owner === requestedOwner; })
+        : mseChunks;
+      try {
+        window.postMessage({
+          source: 'LPS_DOUYIN_MSE_RESULT',
+          id: requestId,
+          chunks: selected.map(function (chunk) {
+            return { id: chunk.id, owner: chunk.owner, mime: chunk.mime, at: chunk.at, data: chunk.data };
+          })
+        }, '*');
+      } catch (e) {
+        try { window.postMessage({ source: 'LPS_DOUYIN_MSE_RESULT', id: requestId, chunks: [] }, '*'); } catch (e2) { /* ignore */ }
+      }
+    }
   });
+
+  function installMseCapture() {
+    try {
+      if (typeof MediaSource === 'undefined' || !MediaSource.prototype || !MediaSource.prototype.addSourceBuffer) return;
+      if (MediaSource.prototype.__lpsMsePatched) return;
+      MediaSource.prototype.__lpsMsePatched = true;
+      try {
+        if (typeof URL !== 'undefined' && URL.createObjectURL && !URL.__lpsMsePatched) {
+          URL.__lpsMsePatched = true;
+          var originalCreateObjectURL = URL.createObjectURL;
+          URL.createObjectURL = function (object) {
+            var url = originalCreateObjectURL.apply(this, arguments);
+            try {
+              if (object && object.__lpsMseOwner) mseBlobOwners[String(url)] = object.__lpsMseOwner;
+            } catch (e) { /* ignore */ }
+            return url;
+          };
+        }
+      } catch (e) { /* ignore */ }
+      var originalAdd = MediaSource.prototype.addSourceBuffer;
+      MediaSource.prototype.addSourceBuffer = function (mime) {
+        var buffer = originalAdd.apply(this, arguments);
+        try {
+          if (!this.__lpsMseOwner) this.__lpsMseOwner = ++mseSourceSeq;
+          buffer.__lpsMseId = this.__lpsMseOwner;
+          buffer.__lpsMseType = String(mime || '');
+        } catch (e) { /* ignore */ }
+        return buffer;
+      };
+      if (typeof SourceBuffer === 'undefined' || !SourceBuffer.prototype || !SourceBuffer.prototype.appendBuffer) return;
+      var originalAppend = SourceBuffer.prototype.appendBuffer;
+      SourceBuffer.prototype.appendBuffer = function (data) {
+        try {
+          var mime = String(this.__lpsMseType || '');
+          if (/(audio|video\/mp4|video\/mp2t|video\/webm)/i.test(mime)) {
+            var copy = null;
+            if (data instanceof ArrayBuffer) {
+              copy = data.slice(0);
+            } else if (data && data.buffer instanceof ArrayBuffer) {
+              copy = data.buffer.slice(data.byteOffset || 0, (data.byteOffset || 0) + (data.byteLength || 0));
+            }
+            if (copy && copy.byteLength) {
+              while (mseBytes + copy.byteLength > MSE_MAX_BYTES && mseChunks.length) {
+                mseBytes -= mseChunks.shift().data.byteLength;
+              }
+              if (mseBytes + copy.byteLength <= MSE_MAX_BYTES) {
+                mseChunks.push({
+                  id: this.__lpsMseId || 0,
+                  owner: this.__lpsMseId || 0,
+                  mime: mime,
+                  at: Date.now(),
+                  data: copy
+                });
+                mseBytes += copy.byteLength;
+              }
+            }
+          }
+        } catch (e) { /* never break playback */ }
+        return originalAppend.apply(this, arguments);
+      };
+    } catch (e) { /* ignore */ }
+  }
+  installMseCapture();
   var originalFetch = window.fetch;
   if (typeof originalFetch === 'function') {
     window.fetch = function () {
@@ -548,6 +637,36 @@ function generate_a_bogus(url_search_params, user_agent) {
     } catch (e) { /* ignore */ }
     return '';
   }
+  function reactAwemeId(root) {
+    var seen = new WeakSet();
+    function scan(value, depth) {
+      if (!value || depth > 7 || typeof value !== 'object' || seen.has(value)) return '';
+      seen.add(value);
+      try {
+        if (value.aweme_id && /^\d{10,}$/.test(String(value.aweme_id))) return String(value.aweme_id);
+        if (value.awemeId && /^\d{10,}$/.test(String(value.awemeId))) return String(value.awemeId);
+      } catch (e) { /* ignore */ }
+      var keys = [];
+      try { keys = Object.keys(value).slice(0, 80); } catch (e) { return ''; }
+      for (var i = 0; i < keys.length; i++) {
+        if (!/aweme|video|item|data|props|detail/i.test(keys[i])) continue;
+        var child = null;
+        try { child = value[keys[i]]; } catch (e) { continue; }
+        var found = scan(child, depth + 1);
+        if (found) return found;
+      }
+      return '';
+    }
+    try {
+      var keys = Object.keys(root || {});
+      for (var i = 0; i < keys.length; i++) {
+        if (!/^__react/i.test(keys[i])) continue;
+        var found = scan(root[keys[i]], 0);
+        if (found) return found;
+      }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
   function lpsAwemeId(preferred) {
     if (preferred && /^\d{10,}$/.test(String(preferred))) return String(preferred);
     // Recommendation pages often keep the URL unchanged when the next clip
@@ -594,6 +713,10 @@ function generate_a_bogus(url_search_params, user_agent) {
             var opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));
             var hm = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);
             if (hm) domFound = hm[1];
+          }
+          if (!domFound && depth < 3) {
+            var reactId = reactAwemeId(node);
+            if (reactId) domFound = reactId;
           }
         }
       }

@@ -11123,8 +11123,43 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
   }
 
+  function reactAwemeIdFromNode(root) {
+    const seen = new WeakSet();
+    const scan = (value, depth) => {
+      if (!value || depth > 7 || typeof value !== 'object') return '';
+      if (seen.has(value)) return '';
+      seen.add(value);
+      try {
+        if (value.aweme_id && /^\d{10,}$/.test(String(value.aweme_id))) return String(value.aweme_id);
+        if (value.awemeId && /^\d{10,}$/.test(String(value.awemeId))) return String(value.awemeId);
+      } catch (e) { /* ignore */ }
+      let keys = [];
+      try { keys = Object.keys(value).slice(0, 80); } catch (e) { return ''; }
+      for (const key of keys) {
+        if (!/aweme|video|item|data|props|detail/i.test(key)) continue;
+        let child = null;
+        try { child = value[key]; } catch (e) { continue; }
+        const found = scan(child, depth + 1);
+        if (found) return found;
+      }
+      return '';
+    };
+    try {
+      for (const key of Object.keys(root || {})) {
+        if (!/^__react/i.test(key)) continue;
+        const found = scan(root[key], 0);
+        if (found) return found;
+      }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
+
   function awemeIdFromVideo(video) {
     if (!video) return '';
+    for (const raw of [video.poster, video.currentSrc, video.src]) {
+      const match = String(raw || '').match(/[?&](?:aweme_id|item_id|video_id)=(\d{10,})/i);
+      if (match) return match[1];
+    }
     let node = video;
     for (let depth = 0; node && depth < 9; depth++, node = node.parentElement) {
       for (const attr of ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id', 'data-itemid', 'data-vid', 'data-e2e-vid', 'data-id']) {
@@ -11142,6 +11177,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         const match = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);
         if (match) return match[1];
       } catch (e) { /* ignore */ }
+      if (depth < 3) {
+        const reactId = reactAwemeIdFromNode(node);
+        if (reactId) return reactId;
+      }
     }
     return '';
   }
@@ -11391,6 +11430,75 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       const chunks = await audioBufferToWavChunks(audioBuffer);
       if (!chunks.length) return null;
       return { dataUrl: chunks[0], chunks, mime: 'audio/wav', duration: audioBuffer.duration };
+    } catch (e) {
+      return null;
+    } finally {
+      try { context.close(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function requestDouyinMseChunks(blobUrl) {
+    return new Promise(resolve => {
+      if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname)) { resolve([]); return; }
+      const id = 'dy-mse-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      let settled = false;
+      const finish = chunks => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', onMessage);
+        clearTimeout(timer);
+        resolve(Array.isArray(chunks) ? chunks.filter(chunk => chunk && chunk.data instanceof ArrayBuffer && chunk.data.byteLength) : []);
+      };
+      const onMessage = event => {
+        if (event.source !== window || !event.data || event.data.source !== 'LPS_DOUYIN_MSE_RESULT' || event.data.id !== id) return;
+        finish(event.data.chunks || []);
+      };
+      const timer = setTimeout(() => finish([]), 10000);
+      window.addEventListener('message', onMessage);
+      try { window.postMessage({ source: 'LPS_DOUYIN_MSE_REQUEST', id, blobUrl: String(blobUrl || '') }, '*'); }
+      catch (e) { finish([]); }
+    });
+  }
+
+  async function extractAudioFromMseChunks(chunks) {
+    if (!Array.isArray(chunks) || !chunks.length) return null;
+    const groups = new Map();
+    for (const chunk of chunks) {
+      if (!chunk || !(chunk.data instanceof ArrayBuffer) || !chunk.data.byteLength) continue;
+      const id = String(chunk.id || 0);
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(chunk);
+    }
+    if (!groups.size) return null;
+    const groupList = Array.from(groups.values());
+    const audioGroups = groupList.filter(group => /audio/i.test(String(group[0] && group[0].mime || '')));
+    const selected = (audioGroups.length ? audioGroups : groupList)
+      .sort((a, b) => {
+        const size = group => group.reduce((sum, chunk) => sum + (chunk.data.byteLength || 0), 0);
+        return size(b) - size(a);
+      })[0];
+    if (!selected || !selected.length) return null;
+    const mime = String(selected[0].mime || 'video/mp4').replace(/;.*$/, '');
+    let arrayBuffer = null;
+    try {
+      const blob = new Blob(selected.map(chunk => chunk.data), { type: mime });
+      arrayBuffer = await blob.arrayBuffer();
+    } catch (e) { return null; }
+    if (!arrayBuffer || !arrayBuffer.byteLength || arrayBuffer.byteLength > MEDIA_MAX_BYTES) return null;
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) return null;
+    const context = new AudioCtor();
+    try {
+      const audioBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+      const channel = audioBuffer.getChannelData(0);
+      let peak = 0;
+      for (let i = 0; i < channel.length; i += 16) peak = Math.max(peak, Math.abs(channel[i]));
+      if (peak < 0.0005) return null;
+      const wavChunks = await audioBufferToWavChunks(audioBuffer);
+      if (!wavChunks.length) return null;
+      const fullBlob = audioBufferToWav(audioBuffer, 16000, 1, 0,
+        Math.ceil(audioBuffer.length * 16000 / audioBuffer.sampleRate));
+      return { dataUrl: wavChunks[0], chunks: wavChunks, fullBlob, mime: 'audio/wav', duration: audioBuffer.duration, source: 'mse' };
     } catch (e) {
       return null;
     } finally {
@@ -13415,13 +13523,25 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         let audio = await extractAudioFromVideo(candidate);
         if (state.cancelled || item.closed) { state.busy = false; return; }
         if (!audio && /douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
+          // The player is MSE: its blob URL has no file behind it, but the
+          // MAIN-world hook has the SourceBuffer bytes.  Reconstruct a local
+          // audio blob before trying to clone the player.
+          if (status) status.textContent = '正在读取 MSE 音轨分片…';
+          updateSummaryLoading(item, 34, '正在读取 MSE 音轨分片…');
+          const mseChunks = await requestDouyinMseChunks((candidate.element || anchorVideo) && (candidate.element || anchorVideo).currentSrc || '');
+          if (mseChunks.length) {
+            if (status) status.textContent = '正在离线解码 MSE 音轨…';
+            updateSummaryLoading(item, 38, '正在离线解码 MSE 音轨…');
+            audio = await extractAudioFromMseChunks(mseChunks);
+          }
+          if (state.cancelled || item.closed) { state.busy = false; return; }
           // Douyin often exposes a separate audio-only DASH stream.  Prefer it
           // over recording the player when the video stream has no audio track.
           const audioCandidate = (state.list || []).find(entry => entry.kind === 'audio'
             && entry.url && entry.srcKind !== 'blob' && entry.srcKind !== 'stream');
-          if (audioCandidate) {
+          if (!audio && audioCandidate) {
             if (status) status.textContent = '发现独立音频流，正在解码音频…';
-            updateSummaryLoading(item, 38, '发现独立音频流，正在解码…');
+            updateSummaryLoading(item, 40, '发现独立音频流，正在解码…');
             audio = await extractAudioFromUrl(audioCandidate);
           }
         }

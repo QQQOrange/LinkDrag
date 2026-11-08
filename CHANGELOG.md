@@ -1,5 +1,12 @@
 # 变更记录
 
+## v1.1.6 — 抖音 MSE 音轨抓取兜底（2026-11-08）
+
+- MAIN-world hook 拦截 `MediaSource.addSourceBuffer` / `SourceBuffer.appendBuffer`，缓存当前播放器的带音频 MSE 分片。
+- 详情接口、页面数据、网络请求和后台克隆都失败时，内容脚本按 SourceBuffer 分组取回分片，在本地解码为 WAV 后送 ASR，不需要前台录制或快进。
+- 新增移动端 `iteminfo` 接口兜底，并扩大当前 `aweme_id` 的 DOM/React 数据提取。
+- 新增 `test/douyin_mse.test.js`。
+
 ## v1.1.5 — 修复更新横幅 CSS 强制显示（2026-11-08）
 
 - 修复 `.update-banner { display:flex }` 覆盖 HTML `hidden` 属性的问题；现在无更新时横幅真正不渲染。
