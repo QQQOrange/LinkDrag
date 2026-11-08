@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.1.4
+/* LinkDrag — Chromium extension v1.1.5
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.1.4 and writes extension/content.js.
+ * manifest version into 1.1.5 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.1.4'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.1.4', name: '' }; }
+      return { version: String(m.version || '1.1.5'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.1.5', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -330,7 +330,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.1.4';
+    return '1.1.5';
   })();
 
   const TOP = window.self === window.top;

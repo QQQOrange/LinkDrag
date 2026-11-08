@@ -1,5 +1,11 @@
 # 变更记录
 
+## v1.1.5 — 修复更新横幅 CSS 强制显示（2026-11-08）
+
+- 修复 `.update-banner { display:flex }` 覆盖 HTML `hidden` 属性的问题；现在无更新时横幅真正不渲染。
+- 版本比较、旧配置清理和 GitHub 跳转逻辑继续保留。
+- 实测无更新时 `hidden=true` 且 `getComputedStyle(...).display === "none"`；模拟新版本时横幅显示，点击可打开对应 Release。
+
 ## v1.1.4 — 修复新版提示误报与更新链接（2026-11-08）
 
 - 更新状态不再信任持久化的 `updateAvailable`，每次按当前扩展版本重新比较。
