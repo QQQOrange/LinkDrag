@@ -1466,7 +1466,9 @@ function aiPrompt(request) {
   const action = String(request.action || 'summary');
   const sys = action === 'video'
     ? '你是 LinkDrag 的视频内容助手。只根据提供的视频字幕/转写文本回答，不要编造字幕没有的信息。用简体中文输出结构化 Markdown 笔记。'
-    : '你是 LinkDrag 的网页阅读助手。只根据提供的网页正文回答，不要编造正文没有的信息。用简体中文回答，结构清晰，适合快速阅读。';
+    : action === 'followup'
+      ? '你是 LinkDrag 的总结追问助手。基于给定的总结、原始内容和对话历史回答追问；总结里没写但原文有的细节要答出来，原文也没有就明确说“原文未说明”。用简体中文，回答简洁但完整，必要时用 Markdown 小标题或要点。'
+      : '你是 LinkDrag 的网页阅读助手。只根据提供的网页正文回答，不要编造正文没有的信息。用简体中文回答，结构清晰，适合快速阅读。';
   let user = '';
   if (action === 'translate') {
     user = '请把下面网页正文翻译成简体中文，保留段落层级和专有名词。\n\n标题：' + title + '\n网址：' + url + '\n\n正文：\n' + text;
@@ -1493,6 +1495,21 @@ function aiPrompt(request) {
 
 字幕如下：`;
     user = videoPrompt + '\n\n【字幕原文开始】\n' + text + '\n【字幕原文结束】\n\n视频标题：' + title + '\n视频网址：' + url;
+  } else if (action === 'followup') {
+    // 追问：优先依据刚生成的总结回答，同时带上原始字幕/正文，
+    // 这样「总结里没展开的细节」也能被回答，而不是被上下文截断。
+    const summary = String(request.summary || '').slice(0, 12000);
+    const question = String(request.question || '').slice(0, 4000);
+    const history = Array.isArray(request.history) ? request.history.slice(-6) : [];
+    const historyText = history
+      .filter(turn => turn && (turn.role === 'user' || turn.role === 'assistant'))
+      .map(turn => (turn.role === 'user' ? '用户：' : '助手：') + String(turn.text || '').slice(0, 1200))
+      .join('\n');
+    user = '下面是这个' + (request.media ? '视频' : '网页') + '的已有总结，请在此基础上回答用户的追问。\n'
+      + (summary ? '\n【已有总结】\n' + summary + '\n' : '')
+      + (historyText ? '\n【此前的追问与回答】\n' + historyText + '\n' : '')
+      + '\n【原始' + (request.media ? '字幕/转写' : '正文') + '（节选）】\n' + text + '\n'
+      + '\n用户问题：' + question + '\n\n标题：' + title + '\n网址：' + url;
   } else {
     const summaryPrompt = String(request.summaryPrompt || '').trim();
     user = (summaryPrompt || '请总结下面网页正文的核心观点、关键事实和结论，控制在简洁的要点中。')

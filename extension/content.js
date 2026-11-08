@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.1.15
+/* LinkDrag — Chromium extension v1.1.17
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.1.15 and writes extension/content.js.
+ * manifest version into 1.1.17 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.1.15'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.1.15', name: '' }; }
+      return { version: String(m.version || '1.1.17'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.1.17', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -345,7 +345,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.1.15';
+    return '1.1.17';
   })();
 
   const TOP = window.self === window.top;
@@ -1925,6 +1925,64 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .markdown li.md-task input{margin:.35em 0 0;flex:0 0 auto;accent-color:var(--accent)}
 .markdown li.md-task-done{color:var(--muted);text-decoration:line-through}
 .markdown del{color:var(--muted)}
+/* 总结目录：默认只显示一个按钮，点开才展开；当前章节标题吸顶。 */
+.summary-toc{position:absolute;top:56px;right:14px;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none}
+.summary-toc-toggle{pointer-events:auto;display:inline-grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:9px;background:color-mix(in srgb,var(--surface) 88%,transparent);color:var(--muted);cursor:pointer;box-shadow:0 6px 16px -12px rgba(18,28,48,.5)}
+.summary-toc-toggle:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+.summary-toc.open .summary-toc-toggle{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+.summary-toc-list{pointer-events:auto;width:min(230px,52vw);max-height:min(52vh,360px);overflow-y:auto;padding:6px;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 96%,transparent);box-shadow:0 18px 44px -24px rgba(18,28,48,.6);scrollbar-width:thin}
+.summary-toc-item{display:block;width:100%;padding:6px 8px;border:0;border-radius:7px;background:transparent;color:var(--text);text-align:left;font-size:11.5px;line-height:1.45;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.summary-toc-item:hover{background:var(--hover);color:var(--accent)}
+.summary-toc-item.active{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font-weight:650}
+.summary-toc-item[data-level="3"]{padding-left:18px;font-size:11px}
+.summary-toc-item[data-level="4"]{padding-left:28px;font-size:10.5px;color:var(--muted)}
+/* 章节标题吸顶：滚动到本章节时贴住滚动区顶部。 */
+/* 章节标题吸顶：只让「当前章节」的标题 sticky。
+   早期把每个标题都设成 sticky，结果所有标题同时贴在顶部互相覆盖，
+   滚动位置完全看不出来，点目录也像是「没跳」。
+   现在由滚动监听给当前章节加 .toc-sticky，滚到下一章时下一个标题接管。 */
+.summary-scroll .markdown h1,.summary-scroll .markdown h2,.summary-scroll .markdown h3,.summary-scroll .markdown h4{scroll-margin-top:8px}
+.summary-scroll .markdown .toc-sticky{position:sticky;top:0;z-index:4;isolation:isolate;margin:0 -2px .5em;padding:7px 4px 6px;background:linear-gradient(180deg,var(--bg) 88%,color-mix(in srgb,var(--bg) 86%,transparent));border-radius:0 0 8px 8px}
+.summary-scroll .markdown .toc-passed{opacity:.9}
+/* 总结内容区必须保有可用高度：追问框和操作栏都在 scroll 之外，
+   没有这条下限时它们会把正文挤到几十像素，目录点击就无处可滚。 */
+.window.summary-window .summary-scroll{min-height:150px}
+/* 下载进度：先下完再保存，进度条在总结内容区下方。 */
+.download-progress{flex:0 0 auto;display:flex;flex-direction:column;gap:5px;margin:2px 0 0;padding:9px 12px;border:1px solid color-mix(in srgb,var(--border) 58%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 52%,transparent)}
+.download-progress[hidden]{display:none!important}
+.download-progress-track{position:relative;height:6px;border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--bg));overflow:hidden}
+.download-progress-bar{display:block;width:0;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 52%,#8b5cf6));transition:width .18s linear}
+.download-progress-text{color:var(--muted);font-size:10.5px;line-height:1.45;font-variant-numeric:tabular-nums}
+.download-progress[data-tone="bad"] .download-progress-bar{background:#d85a6d}
+.download-progress[data-tone="bad"] .download-progress-text{color:#d85a6d}
+.download-progress[data-tone="good"] .download-progress-text{color:var(--accent)}
+/* 总结追问：总结正文下方常驻的对话框 */
+/* The composer sits between the scrolling answer and the action bar.  It must
+   never live inside .summary-scroll: that container is clipped by the panel's
+   overflow:hidden, which left the textarea invisible and impossible to type in. */
+.followup-box{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;gap:6px;margin:0;padding:8px 14px 9px;border-top:1px solid color-mix(in srgb,var(--border) 46%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 92%,transparent),var(--surface));z-index:3;position:relative}
+.followup-box[hidden]{display:none!important}
+.followup-head{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.followup-title{font-size:calc(var(--summary-font-size,14px) - 2px);font-weight:700;color:var(--text)}
+.followup-title::before{content:"✦";margin-right:5px;color:var(--accent)}
+.followup-hint{font-size:calc(var(--summary-font-size,14px) - 4px);color:var(--muted)}
+.followup-list{display:flex;flex-direction:column;gap:7px;max-height:min(28vh,220px);overflow-y:auto;padding:2px;scrollbar-width:thin;overscroll-behavior:contain}
+.followup-list[hidden]{display:none!important}
+.followup-turn{display:flex;gap:7px;align-items:flex-start}
+.followup-role{flex:0 0 auto;padding:1px 6px;border-radius:6px;font-size:calc(var(--summary-font-size,14px) - 4.5px);font-weight:700;line-height:1.6}
+.followup-ask .followup-role{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.followup-answer .followup-role{background:color-mix(in srgb,var(--text) 8%,transparent);color:var(--muted)}
+.followup-text{flex:1;min-width:0;font-size:var(--summary-font-size,14px);line-height:1.72;overflow-wrap:anywhere}
+.followup-text[data-tone="bad"]{color:#d85a6d}
+.followup-text p{margin:.4em 0}
+.followup-text ul,.followup-text ol{margin:.4em 0;padding-left:1.3em}
+.followup-text pre{margin:.5em 0;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--bg) 72%,transparent);overflow:auto}
+.followup-input-row{display:flex;align-items:flex-end;gap:7px}
+.followup-input{flex:1;min-width:0;min-height:30px;max-height:120px;resize:none;padding:7px 10px;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:9px;background:color-mix(in srgb,var(--bg) 62%,transparent);color:var(--text);font-family:inherit;font-size:var(--summary-font-size,14px);line-height:1.55;outline:none}
+.followup-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 12%,transparent)}
+.followup-input:disabled{opacity:.6}
+.followup-send{flex:0 0 auto;padding:7px 12px!important;border-radius:9px!important;color:#fff!important;border-color:transparent!important;background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#7c5ce7))!important;font-weight:650!important}
+.followup-send:disabled{opacity:.55;filter:none}
 .ai-prompt-box{margin:2px 0 8px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--border) 48%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 38%,transparent)}
 .ai-prompt-head{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:4px;min-height:16px}
 .ai-prompt-label{font-size:11px;font-weight:650;color:var(--text);flex:0 0 auto}
@@ -3755,11 +3813,13 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     scroll.appendChild(out);
     scroll.appendChild(meta);
     body.appendChild(scroll);
+    if (typeof buildFollowupBox === 'function') body.appendChild(buildFollowupBox(item));
     body.appendChild(actions);
     item.ui.textAIStatus = status;
     item.ui.textAIOut = out;
     item.ui.textAIMeta = meta;
     runAIAction(item, 'summary', '', out, meta, status);
+    setTimeout(() => { if (typeof syncFollowupVisibility === 'function') syncFollowupVisibility(item); }, 0);
   }
 
   function isDouyinShareUrl(value) {
@@ -4384,7 +4444,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
    *  §14 面板与设置
    * ================================================================================== */
   function closePanel(item, commit) {
-    stopAIPort(item);
+    // A running summary must survive a panel close: the user may reopen it,
+    // and the stream keeps writing into state.answer either way.
+    detachAIPort(item);
     if (!item || item.closed || item.ui.panel.hidden) return;
     // A persistent AI summary must never be reduced to an empty window shell
     // by an outside panel close.  Its X button uses closeWindow explicitly.
@@ -6463,6 +6525,23 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (item.aiTimer) { clearInterval(item.aiTimer); item.aiTimer = null; }
     item.aiBusy = false;
   }
+  /**
+   * 只在「用户明确要停」时断流。
+   * 旧实现把 stopAIPort 挂在 closePanel / 窗口关闭上，而页面上的普通操作
+   * （点一下空白、切换工具、面板重建）都会走到这些路径，于是总结写到一半就被
+   * 掐断 —— 表现就是「动一下网页，总结就卡住」。
+   * 现在面板/窗口关闭只做「暂停显示」，流仍然在后台跑完并缓存结果；
+   * 真正断流只发生在取消、重新开始、或窗口彻底销毁时。
+   */
+  function detachAIPort(item) {
+    if (!item) return;
+    if (item.aiPort) {
+      item.aiPortPaused = item.aiPort;
+      item.aiPort = null;
+    }
+    if (item.aiTimer) { clearInterval(item.aiTimer); item.aiTimer = null; }
+    item.aiBusy = false;
+  }
   let activeAIDropdown = null;
   function closeAIDropdowns() {
     if (activeAIDropdown && activeAIDropdown.menu) activeAIDropdown.menu.hidden = true;
@@ -6684,6 +6763,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (meta) meta.textContent = '准备中…';
     aiPageText(item, text => {
       if (item.closed) return;
+      // Keep the page text so the follow-up box can ground its answers in the
+      // original content, not just in the rendered summary.
+      if (text) item.pageText = String(text).slice(0, 20000);
       if (!text) {
         item.aiBusy = false;
         out.classList.remove('streaming');
@@ -6739,6 +6821,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           if (!item.aiAnswer) out.textContent = '';
           item.aiAnswer += String(msg.text || '');
           out.innerHTML = markdownToHtml(item.aiAnswer);
+          if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item);
           out.classList.add('markdown');
           if (typeof showStreamDots === 'function') showStreamDots(item, out);
           out.scrollTop = out.scrollHeight;
@@ -6757,6 +6840,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           out.dataset.tone = 'good';
           if (!item.aiAnswer) out.textContent = 'AI 没有返回内容。';
           else out.innerHTML = markdownToHtml(item.aiAnswer);
+          if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item);
           out.classList.add('markdown');
           try { out.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
           if (meta) meta.textContent = '已加载完成 · 网页正文 · 用时 ' + Number(msg.elapsed || ((Date.now() - started) / 1000)).toFixed(1) + ' 秒' + (msg.model ? ' · ' + msg.model : '');
@@ -6981,6 +7065,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     body.appendChild(askRow);
     body.appendChild(out);
     body.appendChild(meta);
+    item.ui.aiOut = out;
     item.ui.panel.hidden = false;
     item.ui.shield.hidden = false;
   }
@@ -10254,10 +10339,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
     const videoDownload = el('button', 'text-button summary-action-secondary', '下载视频');
     videoDownload.type = 'button';
+    videoDownload.hidden = true;
+    videoDownload.disabled = true;
     videoDownload.addEventListener('click', () => downloadVideoFromSummary(item));
     const audioDownload = el('button', 'text-button summary-action-secondary', '下载音频');
     audioDownload.type = 'button';
+    audioDownload.hidden = true;
+    audioDownload.disabled = true;
     audioDownload.addEventListener('click', () => downloadAudioFromSummary(item));
+    const downloadProgress = buildDownloadProgress();
     const subtitleDownload = el('button', 'text-button summary-subtitle-button summary-action-primary', '下载字幕 SRT');
     subtitleDownload.type = 'button';
     subtitleDownload.hidden = true;
@@ -10277,18 +10367,30 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (typeof addSummarySteps === 'function') addSummarySteps(item, scroll, 'video', ['扫描字幕', 'AI 总结']);
     scroll.appendChild(out);
     scroll.appendChild(meta);
+    scroll.appendChild(downloadProgress.box);
     body.appendChild(scroll);
+    body.appendChild(buildFollowupBox(item));
     body.appendChild(actions);
     item.ui.videoStatus = status;
     item.ui.videoOut = out;
     item.ui.videoMeta = meta;
     item.ui.videoSubtitleDownload = subtitleDownload;
+    item.ui.videoDownloadBtn = videoDownload;
+    item.ui.videoAudioBtn = audioDownload;
+    item.ui.downloadProgress = downloadProgress.box;
+    item.ui.downloadProgressBar = downloadProgress.bar;
+    item.ui.downloadProgressText = downloadProgress.text;
     if (typeof applySummaryTextStyle === 'function') applySummaryTextStyle(item, out);
-    if (state.answer) out.innerHTML = markdownToHtml(state.answer);
+    if (state.answer) { out.innerHTML = markdownToHtml(state.answer); if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item); }
     else if (state.error) { out.textContent = state.error; out.dataset.tone = 'bad'; }
     else out.textContent = '正在读取视频字幕…';
     if (state.error) status.textContent = '未能读取字幕';
     updateSummarySubtitleButton(item);
+    setDownloadCapability(item, { video: false, audio: false, pending: true });
+    setTimeout(() => {
+      detectDownloadCapability(item).catch(() => { /* ignore */ });
+      if (typeof syncFollowupVisibility === 'function') syncFollowupVisibility(item);
+    }, 60);
   }
 
   function switchVideoToMediaSummary(item, subtitleError) {
@@ -10500,6 +10602,22 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
   }
 
+  /**
+   * 流式输出必须写到「当前活着的」节点上。
+   * 总结面板在页面交互后会被重建（panelFrame 清空整个面板），旧代码在开流时
+   * 就把 out 节点存进了闭包，重建后它变成游离节点 —— 流还在，文字却写进了
+   * 没人看的地方，表现就是「动一下网页总结就卡住」。
+   */
+  function liveSummaryOut(item, kind) {
+    const ui = item && item.ui;
+    if (!ui) return null;
+    const candidates = kind === 'video' ? [ui.videoOut] : kind === 'media' ? [ui.mediaOut] : [ui.aiOut, ui.textAIOut];
+    for (const node of candidates) {
+      if (node && node.isConnected) return node;
+    }
+    return null;
+  }
+
   function streamVideoSummary(item, transcript) {
     const state = item.videoState;
     const out = item.ui.videoOut;
@@ -10577,24 +10695,38 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     keepAlive = setInterval(() => { try { port.postMessage({ type: 'ping' }); } catch (e) { /* ignore */ } }, 15000);
     const started = Date.now();
     state.answer = '';
+    // Resolve the answer node on every render instead of capturing it: the
+    // panel may be rebuilt while the stream is running.
+    const currentOut = () => liveSummaryOut(item, 'video');
     const renderPartial = () => {
-      if (finished || !out) return;
+      if (finished) return;
+      const out = currentOut();
+      if (!out) return;
       out.innerHTML = markdownToHtml(state.answer);
       out.classList.add('markdown');
       if (typeof showStreamDots === 'function') showStreamDots(item, out);
     };
     const scheduleRender = () => {
       if (renderTimer) return;
-      renderTimer = setTimeout(() => { renderTimer = 0; renderPartial(); }, 60);
+      renderTimer = setTimeout(() => {
+        renderTimer = 0;
+        renderPartial();
+        // Streaming replaces the answer HTML on every tick; keep the TOC in
+        // sync so the active chapter and sticky heading stay accurate.
+        const out = currentOut();
+        if (out && typeof refreshSummaryToc === 'function' && collectSummaryHeadings(out).length >= TOC_MIN_HEADINGS) refreshSummaryToc(item);
+      }, 60);
     };
     port.onMessage.addListener(msg => {
       if (!msg || finished) return;
       if (msg.type === 'delta') {
-        if (!state.answer) out.textContent = '';
         state.answer += String(msg.text || '');
         armWatchdog();
         scheduleRender();
-        if (meta) meta.textContent = '生成中 · 已用 ' + Number(msg.elapsed || ((Date.now() - started) / 1000)).toFixed(1) + ' 秒';
+        // Text metadata is purely informational; a rebuilt panel simply has
+        // new nodes, so look them up instead of using stale references.
+        const metaNow = item.ui.videoMeta || meta;
+        if (metaNow) metaNow.textContent = '生成中 · 已用 ' + Number(msg.elapsed || ((Date.now() - started) / 1000)).toFixed(1) + ' 秒';
         if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, Math.min(94, 64 + Math.min(30, state.answer.length / 80)), '正在生成总结…');
         return;
       }
@@ -10605,11 +10737,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         }
         finishOnce(() => {
           state.busy = false;
-          out.classList.remove('streaming');
-          out.classList.add('markdown');
-          out.dataset.tone = 'good';
-          if (!state.answer) out.textContent = 'AI 没有返回内容。';
-          else out.innerHTML = markdownToHtml(state.answer);
+          const out = currentOut();
+          if (out) {
+            out.classList.remove('streaming');
+            out.classList.add('markdown');
+            out.dataset.tone = 'good';
+            if (!state.answer) out.textContent = 'AI 没有返回内容。';
+            else { out.innerHTML = markdownToHtml(state.answer); if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item); }
+          }
           if (typeof hideStreamDots === 'function') hideStreamDots(item);
           if (meta) meta.textContent = '总结来源：' + (state.source || '字幕') + ' · 生成完成 · 用时 ' + Number(msg.elapsed || ((Date.now() - started) / 1000)).toFixed(1) + ' 秒' + (msg.model ? ' · ' + msg.model : '') + (state.startedAt ? ' · 总耗时 ' + Math.max(0.1, (Date.now() - state.startedAt) / 1000).toFixed(1) + ' 秒' : '');
           if (typeof markSummaryStep === 'function') markSummaryStepLabel(item, 'video', 'AI 总结', 'done');
@@ -10617,6 +10752,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           const totalElapsed = state.startedAt ? Math.max(0.1, (Date.now() - state.startedAt) / 1000).toFixed(1) : '';
           if (status) { status.textContent = '已加载完成' + (totalElapsed ? ' · 总耗时 ' + totalElapsed + ' 秒' : ''); status.classList.remove('streaming'); }
           if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, 100, '总结完成' + (totalElapsed ? ' · 总耗时 ' + totalElapsed + ' 秒' : ''));
+          if (typeof syncFollowupVisibility === 'function') syncFollowupVisibility(item);
           if (typeof revealSummaryWindow === 'function') setTimeout(() => revealSummaryWindow(item), 220);
         });
         return;
@@ -12919,7 +13055,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const fontSize = Math.max(12, Math.min(22, Number(item.summaryFontSize == null ? (settings.summaryFontSize == null ? 14 : settings.summaryFontSize) : item.summaryFontSize) || 14));
     win.style.setProperty('--summary-font-size', fontSize + 'px');
     win.dataset.summaryFontSize = String(fontSize);
-    win.querySelectorAll('.video-summary-answer,.media-summary-answer,.text-ai-answer,.ai-answer').forEach(node => { node.style.fontSize = fontSize + 'px'; });
+    win.querySelectorAll(SUMMARY_TEXT_SELECTOR).forEach(node => { node.style.fontSize = fontSize + 'px'; });
     // The summary is a page-side panel.  Use the extension palette instead of
     // the translucent glass fill, otherwise the page tint shows through and
     // the panel looks different from the rest of the light/dark UI.
@@ -13002,10 +13138,30 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     summaryAppearanceStyle = style;
   }
 
+  /** Everything in a summary that follows the 字号 A± control. */
+  const SUMMARY_TEXT_SELECTOR = '.video-summary-answer,.media-summary-answer,.text-ai-answer,.ai-answer,'
+    + '.followup-text,.followup-input,.followup-title,.followup-hint,.followup-role';
+
+  function summaryFontSizeValue(item) {
+    return Math.max(12, Math.min(22, Number(item && item.summaryFontSize == null
+      ? (settings.summaryFontSize || 14)
+      : item.summaryFontSize) || 14));
+  }
+
+  /**
+   * Apply the summary font size to the answer AND the follow-up composer, so the
+   * question/answer text matches the summary instead of staying at a fixed size.
+   */
   function applySummaryTextStyle(item, node) {
-    if (!item || !node) return;
-    const fs = Math.max(12, Math.min(22, Number(item.summaryFontSize == null ? (settings.summaryFontSize || 14) : item.summaryFontSize) || 14));
-    node.style.fontSize = fs + 'px';
+    if (!item) return;
+    const fs = summaryFontSizeValue(item);
+    const win = item.ui && item.ui.win;
+    if (win) {
+      win.style.setProperty('--summary-font-size', fs + 'px');
+      win.dataset.summaryFontSize = String(fs);
+      win.querySelectorAll(SUMMARY_TEXT_SELECTOR).forEach(target => { target.style.fontSize = fs + 'px'; });
+    }
+    if (node) node.style.fontSize = fs + 'px';
   }
 
   function requestMediaDownload(item, candidate, kindOverride, filenameOverride) {
@@ -13069,17 +13225,54 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (!state) return;
     const audioCandidate = (state.list || []).find(candidate => candidate.kind === 'audio' && candidate.url)
       || (state.candidate && state.candidate.kind === 'audio' ? state.candidate : null);
-    if (audioCandidate) { requestMediaDownload(item, audioCandidate, 'audio'); return; }
+    if (audioCandidate) {
+      await prepareAndSave(item, {
+        url: audioCandidate.url,
+        kind: 'audio',
+        label: '音频',
+        filename: cleanDownloadName(item, audioCandidate, 'audio')
+      });
+      return;
+    }
     const videoCandidate = (state.list || []).find(candidate => candidate.kind === 'video' && candidate.url) || state.candidate;
     if (!videoCandidate || videoCandidate.kind !== 'video') { toast(item, '当前没有可提取的音轨'); return; }
-    toast(item, '正在提取音频，请稍候…');
+    updateDownloadProgress(item, 3, '正在从视频中提取音轨…');
     const audio = await extractAudioFromVideo(videoCandidate);
     if (audio && audio.fullBlob) {
-      downloadBlob(audio.fullBlob, cleanDownloadName(item, videoCandidate, 'audio') .replace(/\.[^.]+$/, '.wav'));
-      toast(item, '音频已开始下载');
+      updateDownloadProgress(item, 100, '提取完成，正在保存…');
+      downloadBlob(audio.fullBlob, cleanDownloadName(item, videoCandidate, 'audio').replace(/\.[^.]+$/, '.wav'));
+      setTimeout(() => hideDownloadProgress(item), 2500);
     } else {
-      toast(item, '音频提取失败：没有可下载的独立音轨');
+      updateDownloadProgress(item, 0, '音频提取失败：没有可下载的独立音轨', 'bad');
     }
+  }
+
+  async function ensureDouyinDownloadCandidates(item) {
+    const state = item && item.mediaState;
+    if (!state || !/douyin\.com|iesdouyin\.com/i.test(location.hostname)) return state;
+    const anchorVideo = item.anchorVideo && item.anchorVideo.isConnected
+      ? item.anchorVideo
+      : (typeof findActiveVideoElement === 'function' ? findActiveVideoElement() : null);
+    if (anchorVideo) state.anchorVideo = anchorVideo;
+    if (!Array.isArray(state.list)) state.list = [];
+    if (!anchorVideo) return state;
+    if (!state.downloadDetailPromise) {
+      const requestedId = currentDouyinAwemeId(anchorVideo);
+      state.downloadRequestedId = requestedId;
+      state.downloadDetailPromise = requestDouyinDetail(requestedId, anchorVideo);
+    }
+    let detail = null;
+    try { detail = await state.downloadDetailPromise; } catch (e) { detail = null; }
+    if (!detail || item.closed) return state;
+    const currentId = state.downloadRequestedId || currentDouyinAwemeId(anchorVideo);
+    const mediaDuration = Number(anchorVideo.duration) || 0;
+    const detailId = douyinDetailBoundId(detail, currentId, mediaDuration);
+    if (!detailId) return state;
+    state.boundAwemeId = detailId;
+    state.boundTitle = detail.title || state.boundTitle || '';
+    appendDouyinDetailCandidates(state.list, detail, detailId, mediaDuration, state.boundTitle);
+    if (!state.candidate || !state.candidate.url) state.candidate = state.list[0] || null;
+    return state;
   }
 
   async function ensureMediaForDownload(item) {
@@ -13105,46 +13298,35 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     // detail once on first download so the MP4 and its audio-only track are
     // both available even when the summary came from captions.
     if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname) || !anchorVideo) return state;
-    if (!state.downloadDetailPromise) {
-      const requestedId = currentDouyinAwemeId(anchorVideo);
-      state.downloadRequestedId = requestedId;
-      state.downloadDetailPromise = requestDouyinDetail(requestedId, anchorVideo);
-    }
-    let detail = null;
-    try { detail = await state.downloadDetailPromise; } catch (e) { detail = null; }
-    if (!detail || item.closed) return state;
-    const currentId = state.downloadRequestedId || currentDouyinAwemeId(anchorVideo);
-    const mediaDuration = Number(anchorVideo.duration) || 0;
-    const detailId = douyinDetailBoundId(detail, currentId, mediaDuration);
-    if (!detailId) return state;
-    state.boundAwemeId = detailId;
-    state.boundTitle = detail.title || state.boundTitle || '';
-    appendDouyinDetailCandidates(state.list, detail, detailId, mediaDuration, state.boundTitle);
-    if (!state.candidate || !state.candidate.url) state.candidate = state.list[0] || null;
-    return state;
+    return ensureDouyinDownloadCandidates(item);
   }
 
   async function downloadVideoFromSummary(item) {
     if (!item || item.closed) return;
     if (/bilibili\.com/i.test(location.hostname)) { await downloadBilibiliVideo(item); return; }
-    toast(item, '正在解析视频下载地址…');
+    updateDownloadProgress(item, 2, '正在解析视频下载地址…');
     try {
       await ensureMediaForDownload(item);
+      // Prefer the candidate capability detection already verified; it may be a
+      // direct URL or a fetchable blob source that is not part of the list.
+      const verified = item.downloadVideoCandidate;
+      const list = item.mediaState && Array.isArray(item.mediaState.list) ? item.mediaState.list : null;
+      if (verified && verified.url && list && !list.includes(verified)) list.unshift(verified);
       await downloadMediaVideo(item);
     } catch (e) {
-      toast(item, '视频下载失败：' + String(e && e.message || e || '未知错误'));
+      updateDownloadProgress(item, 0, '视频下载失败：' + String(e && e.message || e || '未知错误'), 'bad');
     }
   }
 
   async function downloadAudioFromSummary(item) {
     if (!item || item.closed) return;
     if (/bilibili\.com/i.test(location.hostname)) { await downloadBilibiliAudio(item); return; }
-    toast(item, '正在解析音频下载地址…');
+    updateDownloadProgress(item, 2, '正在解析音频下载地址…');
     try {
       await ensureMediaForDownload(item);
       await downloadMediaAudio(item);
     } catch (e) {
-      toast(item, '音频下载失败：' + String(e && e.message || e || '未知错误'));
+      updateDownloadProgress(item, 0, '音频下载失败：' + String(e && e.message || e || '未知错误'), 'bad');
     }
   }
 
@@ -13204,21 +13386,36 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
   async function downloadBilibiliVideo(item) {
     if (!item || item.closed) return;
-    toast(item, '正在解析 B 站视频地址…');
-    const media = await bilibiliProgressiveMedia();
-    if (!media) {
-      toast(item, 'B 站没有返回可下载的 MP4：请确认已登录、视频可正常播放（部分视频只提供 DASH 流）');
+    const media = item.biliMedia || await bilibiliProgressiveMedia();
+    if (!media || !media.url) {
+      setDownloadCapability(item, { video: false, audio: !!(item.downloadCaps && item.downloadCaps.audio), note: 'B 站未返回可下载的 MP4' });
+      toast(item, 'B 站没有返回可下载的 MP4：请确认已登录、视频可正常播放');
       return;
     }
-    requestMediaDownload(item, { url: media.url, kind: 'video' }, 'video', bilibiliDownloadName(item, media, 'video'));
+    item.biliMedia = media;
+    await prepareAndSave(item, {
+      url: media.url,
+      kind: 'video',
+      label: '视频',
+      filename: bilibiliDownloadName(item, media, 'video')
+    });
   }
 
   async function downloadBilibiliAudio(item) {
     if (!item || item.closed) return;
-    toast(item, '正在解析 B 站音频地址…');
-    const url = await bilibiliAudioUrl();
-    if (!url) { toast(item, '没有解析到 B 站音频流'); return; }
-    requestMediaDownload(item, { url, kind: 'audio' }, 'audio', bilibiliDownloadName(item, biliVideoInfoFromPage(), 'audio'));
+    const url = item.biliAudioUrl || await bilibiliAudioUrl();
+    if (!url) {
+      setDownloadCapability(item, { video: !!(item.downloadCaps && item.downloadCaps.video), audio: false });
+      toast(item, '没有解析到 B 站音频流');
+      return;
+    }
+    item.biliAudioUrl = url;
+    await prepareAndSave(item, {
+      url,
+      kind: 'audio',
+      label: '音频',
+      filename: bilibiliDownloadName(item, biliVideoInfoFromPage(), 'audio')
+    });
   }
 
   function probeVideoCandidate(candidate, timeoutMs) {
@@ -13475,6 +13672,376 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     button.disabled = !available;
     button.title = available ? '下载当前转写/字幕的 SRT 文件' : '当前没有可下载的字幕';
   }
+
+  /* ---------------------------------------------------------------------------
+   * 下载可得性：只有真的能拿到文件时才显示按钮。
+   * 能力探测是异步的（B 站要问接口、抖音要拿详情），所以按钮先隐藏，
+   * 探测完成后再按结果放出来 —— 避免点下去才发现下载不了。
+   * ------------------------------------------------------------------------- */
+  function downloadButtons(item) {
+    if (!item || !item.ui) return [];
+    return [item.ui.videoDownloadBtn, item.ui.mediaDownload, item.mediaAudioButton || item.ui.mediaAudioDownload]
+      .filter(button => button && button.isConnected);
+  }
+
+  function setDownloadCapability(item, caps) {
+    if (!item) return;
+    const next = Object.assign({ video: false, audio: false, pending: false, note: '' }, item.downloadCaps || {}, caps || {});
+    item.downloadCaps = next;
+    const apply = (button, available, label, hint) => {
+      if (!button || !button.isConnected) return;
+      button.hidden = !available;
+      button.disabled = !available;
+      if (available) {
+        button.textContent = label;
+        button.title = hint || label;
+      }
+    };
+    const videoBtn = item.ui.videoDownloadBtn || item.ui.mediaDownload;
+    const audioBtn = item.ui.videoAudioBtn || item.ui.mediaAudioDownload;
+    apply(videoBtn, next.video, '下载视频', next.videoHint || '下载完整视频文件');
+    apply(audioBtn, next.audio, '下载音频', next.audioHint || '下载独立音轨文件');
+  }
+
+  async function detectDownloadCapability(item) {
+    if (!item || item.closed) return item && item.downloadCaps;
+    const host = String(location.hostname || '');
+    const caps = { video: false, audio: false, pending: true };
+    try {
+      if (/bilibili\.com/i.test(host)) {
+        const [media, audio] = await Promise.all([
+          typeof bilibiliProgressiveMedia === 'function' ? bilibiliProgressiveMedia().catch(() => null) : Promise.resolve(null),
+          typeof bilibiliAudioUrl === 'function' ? bilibiliAudioUrl().catch(() => '') : Promise.resolve('')
+        ]);
+        if (media && media.url) {
+          item.biliMedia = media;
+          caps.video = true;
+          caps.videoHint = media.size
+            ? '下载完整 MP4 · 约 ' + Math.round(media.size / 1024 / 1024) + 'MB'
+            : '下载完整 MP4';
+        }
+        if (audio) {
+          item.biliAudioUrl = audio;
+          caps.audio = true;
+        }
+        if (!caps.video && !caps.audio) caps.note = 'B 站未返回可下载的音视频流（可能需要登录）';
+      } else if (/douyin\.com|iesdouyin\.com/i.test(host)) {
+        const state = item.mediaState;
+        if (state) {
+          if (!Array.isArray(state.list)) state.list = [];
+          await ensureDouyinDownloadCandidates(item);
+          const video = (state.list || []).find(entry => entry && entry.kind === 'video' && entry.url && /^https?:\/\//i.test(entry.url));
+          const audio = (state.list || []).find(entry => entry && entry.kind === 'audio' && entry.url && /^https?:\/\//i.test(entry.url));
+          caps.video = !!video;
+          caps.audio = !!audio;
+          if (video) item.downloadVideoCandidate = video;
+          if (audio) item.downloadAudioCandidate = audio;
+        }
+      } else {
+        // Generic pages: a video is download-able when the page exposes a real
+        // http(s) media URL, or when a same-page <video> source can be fetched
+        // directly.  This must work for the video-summary panel too, where
+        // mediaState may not exist yet.
+        const state = item.mediaState;
+        let list = Array.isArray(state && state.list) ? state.list.slice() : [];
+        if (!list.length && typeof scanMediaCandidates === 'function') {
+          try { list = scanMediaCandidates() || []; } catch (e) { list = []; }
+        }
+        const directOf = kind => list.find(entry => entry && entry.kind === kind && entry.url
+          && /^https?:\/\//i.test(entry.url) && !/^blob:/i.test(entry.url) && !entry.downloadOnly) || null;
+        const video = directOf('video');
+        const audio = directOf('audio');
+        caps.video = !!video;
+        caps.audio = !!audio;
+        if (video) item.downloadVideoCandidate = video;
+        if (audio) item.downloadAudioCandidate = audio;
+        if (!caps.video) {
+          // The player may expose a blob: URL whose backing file is still
+          // fetchable.  Ask the browser: a same-origin media URL that resolves
+          // with a video content-type is genuinely downloadable.
+          const anchor = item.anchorVideo && item.anchorVideo.isConnected ? item.anchorVideo : null;
+          const sourceUrl = String((video && video.url) || (anchor && (anchor.currentSrc || anchor.src)) || '');
+          if (/^(https?|blob):/i.test(sourceUrl)) {
+            try {
+              const head = await fetch(sourceUrl, { method: 'HEAD', credentials: 'include' });
+              const type = String(head.headers.get('content-type') || '');
+              const size = Number(head.headers.get('content-length') || 0);
+              if (head.ok && /^video\//i.test(type) && size > 1024) {
+                caps.video = true;
+                caps.videoHint = '下载完整视频 · ' + Math.round(size / 1024 / 1024) + 'MB';
+                if (!item.downloadVideoCandidate) {
+                  item.downloadVideoCandidate = { url: sourceUrl, kind: 'video', srcKind: 'direct', duration: 0 };
+                }
+              }
+            } catch (e) { /* blob: cannot be HEAD-ed; stays unavailable */ }
+          }
+        }
+        if (!caps.video) caps.note = '当前视频没有可直接下载的文件';
+      }
+    } catch (e) {
+      caps.note = String(e && e.message || e || '');
+    }
+    caps.pending = false;
+    setDownloadCapability(item, caps);
+    return caps;
+  }
+
+  function updateDownloadProgress(item, percent, text, tone) {
+    if (!item || !item.ui) return;
+    const box = item.ui.downloadProgress;
+    const bar = item.ui.downloadProgressBar;
+    const label = item.ui.downloadProgressText;
+    if (!box) return;
+    const done = Number(percent) >= 100;
+    box.hidden = false;
+    box.dataset.tone = tone || (done ? 'good' : '');
+    if (bar) bar.style.width = Math.max(0, Math.min(100, Number(percent) || 0)) + '%';
+    if (label) label.textContent = text || (done ? '已准备完成' : '正在准备下载…');
+  }
+
+  function hideDownloadProgress(item) {
+    const box = item && item.ui && item.ui.downloadProgress;
+    if (box) box.hidden = true;
+  }
+
+  function buildDownloadProgress() {
+    const box = el('div', 'download-progress');
+    const track = el('div', 'download-progress-track');
+    const bar = el('i', 'download-progress-bar');
+    track.appendChild(bar);
+    const text = el('span', 'download-progress-text', '');
+    box.appendChild(track);
+    box.appendChild(text);
+    box.hidden = true;
+    return { box, bar, text };
+  }
+
+  /** 流式下载，按已接收字节回报进度（拿不到 content-length 时按"已下载"显示）。 */
+  async function fetchBlobWithProgress(url, onProgress, options) {
+    const init = Object.assign({ credentials: 'include' }, options || {});
+    const response = await fetch(url, init);
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const total = Number(response.headers.get('content-length') || 0);
+    const type = response.headers.get('content-type') || 'application/octet-stream';
+    if (!response.body || typeof response.body.getReader !== 'function' || !total) {
+      const blob = await response.blob();
+      if (onProgress) onProgress(blob.size || 1, blob.size || 1, true);
+      return blob;
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const step = await reader.read();
+      if (step.done) break;
+      chunks.push(step.value);
+      received += step.value.length;
+      if (onProgress) onProgress(received, total);
+    }
+    if (onProgress) onProgress(total, total, true);
+    return new Blob(chunks, { type });
+  }
+
+  /**
+   * 先把整份文件在后台下载完，再触发"保存"。
+   * 这样用户点下载后看到的是真实进度，而不是浏览器下载条突然出现又失败。
+   */
+  async function prepareAndSave(item, options) {
+    const opts = options || {};
+    const label = opts.label || '媒体';
+    updateDownloadProgress(item, 1, '正在准备' + label + '…');
+    let blob = null;
+    try {
+      blob = await fetchBlobWithProgress(opts.url, (received, total, finished) => {
+        if (finished) return;
+        const percent = total ? Math.min(99, (received / total) * 100) : 30;
+        const size = total ? Math.round(total / 1024 / 1024) + 'MB' : '';
+        updateDownloadProgress(item, percent, '正在下载' + label + (size ? ' · ' + size : '') + ' · ' + Math.round(percent) + '%');
+      }, opts.init);
+    } catch (e) {
+      // 页面侧被 CORS/防盗链挡住时交给后台下载（后台带 Referer，但会走浏览器下载条）。
+      const detail = String(e && e.message || e);
+      updateDownloadProgress(item, 0, '页面侧受限（' + detail + '），改用后台下载…');
+      requestMediaDownload(item, { url: opts.url, kind: opts.kind }, opts.kind, opts.filename);
+      setTimeout(() => hideDownloadProgress(item), 2000);
+      return false;
+    }
+    if (!blob || !blob.size) {
+      updateDownloadProgress(item, 0, '下载到的文件为空', 'bad');
+      return false;
+    }
+    updateDownloadProgress(item, 100, '下载完成，正在保存 ' + Math.round(blob.size / 1024 / 1024) + 'MB…');
+    const ok = downloadBlob(blob, opts.filename);
+    setTimeout(() => hideDownloadProgress(item), ok ? 2500 : 0);
+    if (!ok) updateDownloadProgress(item, 0, '保存失败，请重试', 'bad');
+    return ok;
+  }
+  /* ---------------------------------------------------------------------------
+   * 总结目录（TOC）
+   * 用户诉求：总结按「第一部分 / 第二部分」分段时，
+   *   1) 滚动时当前章节标题吸顶；
+   *   2) 右侧有个目录按钮，默认只有按钮，点开才展开目录；
+   *   3) 点目录项直接跳到对应段落。
+   * 实现：渲染后给每个标题加唯一 id，用 IntersectionObserver 之外的
+   * 轻量滚动计算决定「当前章节」，并把当前章节标题用 position:sticky 钉住。
+   * ------------------------------------------------------------------------- */
+  const TOC_MIN_HEADINGS = 2;
+
+  function collectSummaryHeadings(root) {
+    if (!root) return [];
+    const nodes = Array.from(root.querySelectorAll('h1,h2,h3,h4'));
+    return nodes.filter(node => String(node.textContent || '').trim().length > 0);
+  }
+
+  /**
+   * Scroll a summary heading into view inside its own scroll container.
+   * `scrollIntoView` respects nested scrollers and is far more reliable than
+   * adding offsetTop (which is relative to the positioned answer card, not the
+   * scroller) — that mismatch is why TOC clicks appeared to do nothing.
+   */
+  function jumpToHeading(scroller, heading) {
+    if (!scroller || !heading) return false;
+    let before = -1;
+    try { before = scroller.scrollTop; } catch (e) { /* ignore */ }
+    try {
+      heading.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' });
+    } catch (e) {
+      try { heading.scrollIntoView(true); } catch (e2) { /* ignore */ }
+    }
+    // Fallback for engines where scrollIntoView picks the wrong ancestor:
+    // compute the offset in the scroller's coordinate space and scroll manually.
+    try {
+      const scRect = scroller.getBoundingClientRect();
+      const hRect = heading.getBoundingClientRect();
+      const delta = hRect.top - scRect.top;
+      if (Math.abs(delta) > 24) {
+        const target = Math.max(0, scroller.scrollTop + delta - 4);
+        try { scroller.scrollTo({ top: target, behavior: 'smooth' }); }
+        catch (e) { scroller.scrollTop = target; }
+      }
+    } catch (e) { /* ignore */ }
+    // Re-assert the active chapter immediately so the sticky heading follows
+    // the click even before the smooth scroll finishes.
+    try {
+      const headings = Array.from(scroller.querySelectorAll('h1,h2,h3,h4'));
+      const index = headings.indexOf(heading);
+      if (index >= 0) {
+        headings.forEach((h, i) => {
+          h.classList.toggle('toc-sticky', i === index);
+          h.classList.toggle('toc-passed', i < index);
+        });
+      }
+      if (before >= 0) scroller.dataset.lastJump = String(before);
+    } catch (e) { /* ignore */ }
+    return true;
+  }
+
+  function bindSummaryToc(item, root) {
+    if (!item || !root) return;
+    const headings = collectSummaryHeadings(root);
+    const panel = item.ui && item.ui.panel;
+    const existing = panel && panel.querySelector('.summary-toc');
+    if (headings.length < TOC_MIN_HEADINGS) {
+      if (existing) existing.remove();
+      if (item._tocScroll) { try { root.removeEventListener('scroll', item._tocScroll); } catch (e) { /* ignore */ } item._tocScroll = null; }
+      return;
+    }
+    const idPrefix = 'ldp-toc-' + (item.id || Math.random().toString(36).slice(2));
+    headings.forEach((node, index) => {
+      if (!node.id || headings.some((other, i) => i !== index && other.id === node.id)) node.id = idPrefix + '-' + index;
+      node.dataset.tocIndex = String(index);
+    });
+
+    const shellEl = panel || root;
+    let nav = shellEl.querySelector('.summary-toc');
+    if (!nav) {
+      const wrap = document.createElement('div');
+      wrap.className = 'summary-toc';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'summary-toc-toggle';
+      toggle.title = '目录';
+      toggle.setAttribute('aria-label', '目录');
+      toggle.innerHTML = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2 3.5h12a.75.75 0 0 1 0 1.5H2a.75.75 0 0 1 0-1.5Zm0 4h12a.75.75 0 0 1 0 1.5H2a.75.75 0 0 1 0-1.5Zm0 4h8a.75.75 0 0 1 0 1.5H2a.75.75 0 0 1 0-1.5Z"/></svg>';
+      const list = document.createElement('div');
+      list.className = 'summary-toc-list';
+      list.hidden = true;
+      wrap.appendChild(toggle);
+      wrap.appendChild(list);
+      shellEl.appendChild(wrap);
+      nav = wrap;
+      toggle.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const open = list.hidden;
+        list.hidden = !open;
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        wrap.classList.toggle('open', open);
+      });
+      // 点外面收起，避免挡住总结正文
+      document.addEventListener('pointerdown', event => {
+        if (!wrap.isConnected || list.hidden) return;
+        const path = event.composedPath ? event.composedPath() : [];
+        if (path.includes(wrap)) return;
+        list.hidden = true;
+        wrap.classList.remove('open');
+      }, true);
+    }
+    const list = nav.querySelector('.summary-toc-list');
+    list.innerHTML = '';
+    headings.forEach((node, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'summary-toc-item';
+      button.dataset.target = node.id;
+      const level = Math.min(4, Math.max(1, Number(node.tagName.slice(1)) || 1));
+      button.dataset.level = String(level);
+      button.textContent = String(node.textContent || '').trim();
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        list.hidden = true;
+        nav.classList.remove('open');
+        jumpToHeading(root, node);
+      });
+      list.appendChild(button);
+    });
+
+    // 当前章节高亮 + 吸顶标题
+    if (item._tocScroll) { try { root.removeEventListener('scroll', item._tocScroll); } catch (e) { /* ignore */ } }
+    let raf = 0;
+    const sync = () => {
+      raf = 0;
+      if (!root.isConnected) return;
+      const items = Array.from(list.querySelectorAll('.summary-toc-item'));
+      // Compare positions in the scroller's coordinate space; offsetTop refers
+      // to the positioned answer card, which is not the scroll container.
+      const scrollerRect = root.getBoundingClientRect();
+      let active = 0;
+      headings.forEach((node, index) => {
+        const nodeRect = node.getBoundingClientRect();
+        if (nodeRect.top - scrollerRect.top <= 56) active = index;
+      });
+      items.forEach((button, index) => button.classList.toggle('active', index === active));
+      headings.forEach((node, index) => {
+        node.classList.toggle('toc-sticky', index === active);
+        node.classList.toggle('toc-passed', index < active);
+      });
+    };
+    item._tocScroll = () => { if (!raf) raf = requestAnimationFrame(sync); };
+    root.addEventListener('scroll', item._tocScroll, { passive: true });
+    sync();
+  }
+
+  function refreshSummaryToc(item) {
+    if (!item || !item.ui) return;
+    const answers = [item.ui.videoOut, item.ui.mediaOut, item.ui.textAIOut, item.ui.aiOut].filter(Boolean);
+    const root = item.ui.panel && item.ui.panel.querySelector('.summary-scroll');
+    const target = answers.find(node => node.isConnected && collectSummaryHeadings(node).length >= TOC_MIN_HEADINGS);
+    if (!target || !root) { bindSummaryToc(item, root || (answers[0] && answers[0].parentElement)); return; }
+    bindSummaryToc(item, root);
+  }
+
   function downloadSummarySubtitles(item) {
     const info = summarySubtitleState(item);
     if (!info || !info.text.trim()) { toast(item, '当前没有可下载的字幕'); return false; }
@@ -13484,6 +14051,189 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const ok = downloadBlob(blob, cleanBaseDownloadName(item) + '.srt');
     toast(item, ok ? '字幕 SRT 已开始下载' : '字幕下载失败');
     return ok;
+  }
+
+  /* ---------------------------------------------------------------------------
+   * 总结追问（Follow-up）
+   * 总结完成后，正文下方常驻一个对话框：对总结里没讲清的地方可以立刻追问。
+   * 上下文链：已有总结 + 原始字幕/正文节选 + 最近几轮问答。
+   * ------------------------------------------------------------------------- */
+  const FOLLOWUP_HISTORY_LIMIT = 12;
+
+  function summaryContextFor(item) {
+    if (!item) return { summary: '', source: '', media: false, title: document.title || '' };
+    if (item.mediaState) {
+      const state = item.mediaState;
+      return {
+        summary: String(state.answer || state.transcript || '').slice(0, 12000),
+        source: String(state.transcript || '').slice(0, 9000),
+        media: true,
+        title: String(state.boundTitle || item.title || document.title || '')
+      };
+    }
+    if (item.videoState) {
+      const state = item.videoState;
+      return {
+        summary: String(state.answer || state.transcript || '').slice(0, 12000),
+        source: String(state.transcript || '').slice(0, 9000),
+        media: true,
+        title: String(item.title || document.title || '')
+      };
+    }
+    return {
+      summary: String(item.aiAnswer || '').slice(0, 12000),
+      source: String(item.pageText || '').slice(0, 9000),
+      media: false,
+      title: String(item.title || document.title || '')
+    };
+  }
+
+  function followupBusyUI(item, busy) {
+    const ui = item && item.ui;
+    if (!ui || !ui.followupSend) return;
+    ui.followupSend.disabled = !!busy;
+    ui.followupSend.textContent = busy ? '回答中…' : '追问';
+    if (ui.followupInput) ui.followupInput.disabled = !!busy;
+  }
+
+  function appendFollowupTurn(item, role, text) {
+    const list = item.ui && item.ui.followupList;
+    if (!list) return null;
+    const row = el('div', 'followup-turn followup-' + (role === 'user' ? 'ask' : 'answer'));
+    const label = el('span', 'followup-role', role === 'user' ? '你' : 'AI');
+    const body = el('div', 'followup-text' + (role === 'assistant' ? ' markdown' : ''));
+    body.textContent = String(text || '');
+    body.style.fontSize = summaryFontSizeValue(item) + 'px';
+    row.appendChild(label);
+    row.appendChild(body);
+    list.appendChild(row);
+    list.hidden = false;
+    const scroller = item.ui.panel && item.ui.panel.querySelector('.summary-scroll');
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    return body;
+  }
+
+  async function askFollowup(item, question) {
+    const ask = String(question || '').trim();
+    if (!item || item.closed || !ask) return;
+    if (item.followupBusy) { toast(item, '正在回答上一个问题，请稍等'); return; }
+    const ctx = summaryContextFor(item);
+    if (!ctx.summary && !ctx.source) { toast(item, '还没有总结内容，先完成一次总结再追问'); return; }
+    const history = Array.isArray(item.followupHistory) ? item.followupHistory : (item.followupHistory = []);
+    item.followupBusy = true;
+    followupBusyUI(item, true);
+    appendFollowupTurn(item, 'user', ask);
+    history.push({ role: 'user', text: ask.slice(0, 2000) });
+    const answerNode = appendFollowupTurn(item, 'assistant', '正在思考…');
+    const request = {
+      action: 'followup',
+      text: (ctx.source || ctx.summary).slice(0, 20000),
+      summary: ctx.summary,
+      question: ask.slice(0, 4000),
+      history: history.slice(-6),
+      media: !!ctx.media,
+      title: ctx.title,
+      url: location.href,
+      provider: item.aiVendor || aiConfig.provider,
+      endpoint: aiProviderConfig(item.aiVendor || aiConfig.provider).endpoint,
+      model: (aiConfig.selectedModels && aiConfig.selectedModels[item.aiVendor || aiConfig.provider]) || aiConfig.model
+    };
+    const finish = text => {
+      item.followupBusy = false;
+      followupBusyUI(item, false);
+      if (answerNode && answerNode.isConnected) {
+        answerNode.classList.add('markdown');
+        answerNode.innerHTML = markdownToHtml(String(text || '（没有返回内容）'));
+        if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item);
+      }
+      history.push({ role: 'assistant', text: String(text || '').slice(0, 2000) });
+      if (history.length > FOLLOWUP_HISTORY_LIMIT) history.splice(0, history.length - FOLLOWUP_HISTORY_LIMIT);
+      const scroller = item.ui && item.ui.panel && item.ui.panel.querySelector('.summary-scroll');
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    };
+    const fail = detail => {
+      item.followupBusy = false;
+      followupBusyUI(item, false);
+      if (answerNode && answerNode.isConnected) {
+        answerNode.classList.remove('markdown');
+        answerNode.textContent = '追问失败：' + String(detail || '接口没有返回内容');
+        answerNode.dataset.tone = 'bad';
+      }
+    };
+    if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { fail('扩展后台不可用'); return; }
+    const timer = setTimeout(() => fail('追问超过 120 秒没有返回'), 120000);
+    try {
+      EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:ai', request }, response => {
+        clearTimeout(timer);
+        let lastError = null;
+        try { lastError = EXT.runtime.lastError; } catch (e) { /* ignore */ }
+        if (lastError) { fail(String(lastError.message || lastError)); return; }
+        if (!response || !response.ok) { fail((response && (response.detail || response.reason)) || '接口错误'); return; }
+        finish(response.text || '');
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      fail(e && e.message ? e.message : '请求发送失败');
+    }
+  }
+
+  function buildFollowupBox(item) {
+    const wrap = el('div', 'followup-box');
+    const head = el('div', 'followup-head');
+    const title = el('span', 'followup-title', '继续追问');
+    const hint = el('span', 'followup-hint', '对总结里不清楚的地方直接提问');
+    head.appendChild(title);
+    head.appendChild(hint);
+    const list = el('div', 'followup-list');
+    list.hidden = true;
+    const row = el('div', 'followup-input-row');
+    const input = document.createElement('textarea');
+    input.className = 'followup-input';
+    input.rows = 1;
+    input.placeholder = '例如：第二部分说的“容错系统”具体怎么做？';
+    input.spellcheck = false;
+    const send = el('button', 'text-button followup-send', '追问');
+    send.type = 'button';
+    const submit = () => {
+      const value = String(input.value || '').trim();
+      if (!value) { input.focus(); return; }
+      input.value = '';
+      input.style.height = '';
+      askFollowup(item, value);
+    };
+    send.addEventListener('click', submit);
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(96, Math.max(30, input.scrollHeight)) + 'px';
+    });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        submit();
+      }
+    });
+    row.appendChild(input);
+    row.appendChild(send);
+    wrap.appendChild(head);
+    wrap.appendChild(list);
+    wrap.appendChild(row);
+    item.ui.followupBox = wrap;
+    item.ui.followupList = list;
+    item.ui.followupInput = input;
+    item.ui.followupSend = send;
+    // Match the current summary size immediately instead of waiting for the
+    // next A± click.
+    try { applySummaryTextStyle(item); } catch (e) { /* ignore */ }
+    return wrap;
+  }
+
+  /** 追问区只应在有总结内容之后出现；提前建好会让空面板显得很吵。 */
+  function syncFollowupVisibility(item) {
+    const box = item && item.ui && item.ui.followupBox;
+    if (!box) return;
+    const ctx = summaryContextFor(item);
+    const ready = !!(String(ctx.summary || '').trim() || String(ctx.source || '').trim());
+    box.hidden = !ready;
   }
 
   function addSummaryAppearance(item, actions) {
@@ -13527,7 +14277,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         const effective = Number(item.summaryOpacity == null ? 100 : item.summaryOpacity);
         item.ui.win.style.opacity = String((effective === 92 ? 100 : effective) / 100);
         item.ui.win.style.setProperty('--summary-font-size', String(item.summaryFontSize || settings.summaryFontSize || 14) + 'px');
-        item.ui.win.querySelectorAll('.video-summary-answer,.media-summary-answer,.text-ai-answer,.ai-answer').forEach(node => { node.style.fontSize = String(item.summaryFontSize || settings.summaryFontSize || 14) + 'px'; });
+        item.ui.win.querySelectorAll(SUMMARY_TEXT_SELECTOR).forEach(node => { node.style.fontSize = summaryFontSizeValue(item) + 'px'; });
       }
       try { updateSetting(item, 'summaryFontSize', item.summaryFontSize || settings.summaryFontSize || 14); } catch (e) { /* ignore */ }
       try { updateSetting(item, 'summaryOpacity', item.summaryOpacity == null ? 100 : item.summaryOpacity); } catch (e) { /* ignore */ }
@@ -13636,11 +14386,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const videoDownload = el('button', 'text-button summary-action-secondary', '下载视频');
     videoDownload.type = 'button';
     videoDownload.hidden = true;
-    videoDownload.addEventListener('click', () => downloadMediaVideo(item));
+    videoDownload.disabled = true;
+    videoDownload.addEventListener('click', () => downloadVideoFromSummary(item));
     const audioDownload = el('button', 'text-button summary-action-secondary', '下载音频');
     audioDownload.type = 'button';
     audioDownload.hidden = true;
-    audioDownload.addEventListener('click', () => downloadMediaAudio(item));
+    audioDownload.disabled = true;
+    audioDownload.addEventListener('click', () => downloadAudioFromSummary(item));
+    const downloadProgress = buildDownloadProgress();
     const subtitleDownload = el('button', 'text-button summary-subtitle-button summary-action-primary', '下载字幕 SRT');
     subtitleDownload.type = 'button';
     subtitleDownload.hidden = true;
@@ -13682,7 +14435,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
     scroll.appendChild(out);
     scroll.appendChild(meta);
+    scroll.appendChild(downloadProgress.box);
     body.appendChild(scroll);
+    body.appendChild(buildFollowupBox(item));
     body.appendChild(actions);
     item.ui.mediaStatus = status;
     item.ui.mediaProgress = progressBar;
@@ -13692,12 +14447,19 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     item.ui.mediaDownload = videoDownload;
     item.ui.mediaAudioDownload = audioDownload;
     item.ui.mediaSubtitleDownload = subtitleDownload;
+    item.ui.downloadProgress = downloadProgress.box;
+    item.ui.downloadProgressBar = downloadProgress.bar;
+    item.ui.downloadProgressText = downloadProgress.text;
     if (typeof applySummaryTextStyle === 'function') applySummaryTextStyle(item, out);
     publishSidePanel(item, state.error ? '未能提取媒体' : (state.busy ? '正在处理…' : '准备中…'), state.error ? 'bad' : '');
-    if (state.answer) out.innerHTML = markdownToHtml(state.answer);
+    if (state.answer) { out.innerHTML = markdownToHtml(state.answer); if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item); }
     else if (state.error) { out.textContent = state.error; out.dataset.tone = 'bad'; }
     else out.textContent = state.textMode ? '正在读取网页正文…' : '正在读取媒体…';
     updateSummarySubtitleButton(item);
+    setTimeout(() => {
+      detectDownloadCapability(item).catch(() => { /* ignore */ });
+      if (typeof syncFollowupVisibility === 'function') syncFollowupVisibility(item);
+    }, 80);
   }
 
   function openMediaSummaryPanel(options) {
@@ -13919,6 +14681,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           if (status) status.textContent = '已加载完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : '');
           publishSidePanel(item, '总结完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : ''), 'good');
           updateSummaryLoading(item, 100, '总结完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : ''));
+      if (typeof syncFollowupVisibility === 'function') syncFollowupVisibility(item);
           setTimeout(() => revealSummaryWindow(item), 220);
         });
       } catch (e) {
@@ -13956,6 +14719,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const status = item.ui.mediaStatus;
     const meta = item.ui.mediaMeta;
     if (!state || !out) return;
+    // The panel may be rebuilt while the stream runs; always resolve the live
+    // answer node before writing to it.
+    const currentOut = () => liveSummaryOut(item, 'media') || out;
     const text = String(transcript || '').trim();
     if (!text) {
       state.busy = false;
@@ -14039,14 +14805,23 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const started = Date.now();
     let answer = '';
     const renderPartial = () => {
-      if (streamDone || !out) return;
-      out.classList.add('markdown');
-      out.innerHTML = markdownToHtml(answer);
-      showStreamDots(item, out);
+      if (streamDone) return;
+      const target = currentOut();
+      if (!target) return;
+      target.classList.add('markdown');
+      target.innerHTML = markdownToHtml(answer);
+      if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item);
+      showStreamDots(item, target);
     };
     const scheduleRender = () => {
       if (renderTimer) return;
-      renderTimer = setTimeout(() => { renderTimer = 0; renderPartial(); }, 60);
+      renderTimer = setTimeout(() => {
+        renderTimer = 0;
+        renderPartial();
+        // Streaming replaces the answer HTML on every tick; keep the TOC in
+        // sync so the active chapter and sticky heading stay accurate.
+        if (typeof refreshSummaryToc === 'function' && collectSummaryHeadings(out).length >= TOC_MIN_HEADINGS) refreshSummaryToc(item);
+      }, 60);
     };
     const request = {
       action: 'video',
@@ -14077,13 +14852,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         endStream();
         state.answer = answer;
         state.busy = false;
-        if (out) { out.classList.remove('streaming'); out.classList.add('markdown'); out.innerHTML = markdownToHtml(answer); hideStreamDots(item); out.dataset.tone = 'good'; }
+        if (out) { out.classList.remove('streaming'); out.classList.add('markdown'); out.innerHTML = markdownToHtml(answer);
+      if (typeof refreshSummaryToc === 'function') refreshSummaryToc(item); hideStreamDots(item); out.dataset.tone = 'good'; }
         if (status) { status.textContent = '已加载完成'; status.classList.remove('streaming'); }
         if (item.ui && item.ui.mediaProgress) item.ui.mediaProgress.style.width = '100%';
         if (item.ui && item.ui.mediaPercent) item.ui.mediaPercent.textContent = '100%';
         if (meta) meta.textContent = (state.boundTitle ? '当前视频：' + state.boundTitle + ' · ' : '') + '已加载完成 · 总结来源：音频（ASR） · 文本模型 ' + (msg.model || '') + ' · 总耗时 ' + Math.max(0.1, (Date.now() - (state.startedAt || started)) / 1000).toFixed(1) + ' 秒';
         if (typeof markSummaryStep === 'function') markSummaryStepLabel(item, 'media', 'AI 总结', 'done');
         if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, 100, '总结完成');
+      if (typeof syncFollowupVisibility === 'function') syncFollowupVisibility(item);
         setTimeout(() => revealSummaryWindow(item), 120);
         try { port.disconnect(); } catch (e) { /* ignore */ }
         item.aiPort = null;
@@ -14657,6 +15434,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (meta) meta.textContent = (state.boundTitle ? '当前视频：' + state.boundTitle + ' · ' : '') + '总结来源：' + (result.kind === 'audio' ? '音频（ASR）' : '媒体') + ' · 模型 ' + (result.model || 'ASR') + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : '') + (result.size ? ' · ' + Math.round(result.size / 1024 / 1024) + 'MB' : '');
       publishSidePanel(item, '总结完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : ''), 'good');
       updateSummaryLoading(item, 100, '总结完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : ''));
+      if (typeof syncFollowupVisibility === 'function') syncFollowupVisibility(item);
       setTimeout(() => revealSummaryWindow(item), 220);
     } catch (e) {
       state.busy = false;

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>流式总结验收页</title>
+  <style>
+    body { margin: 0; padding: 36px; font: 15px/1.7 system-ui, "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #1f2430; }
+    .wrap { width: 640px; max-width: 100%; }
+    video { display: block; width: 640px; max-width: 100%; height: 340px; background: #172033; border-radius: 12px; }
+    .noise { margin-top: 18px; padding: 14px; border: 1px dashed #b8c2d4; border-radius: 10px; background: #fff; }
+    a { color: #1f5fbf; }
+  </style>
+</head>
+<body>
+  <h1>流式总结验收页</h1>
+  <p>打开视频总结后，在别处点击、滚动、切换窗口，总结应当继续流式输出。</p>
+  <div class="wrap">
+    <video id="demoVideo" controls playsinline>
+      <track kind="captions" src="captions.vtt" srclang="zh" label="中文" default>
+    </video>
+  </div>
+  <div class="noise" id="noise">
+    <p><strong>用于模拟「用户操作页面」</strong></p>
+    <p><a href="#n1">锚点一</a> · <a href="#n2">锚点二</a> · <a href="#n3">锚点三</a></p>
+    <div style="height:900px"></div>
+    <p id="n1">区域一</p>
+    <div style="height:700px"></div>
+    <p id="n2">区域二</p>
+    <div style="height:700px"></div>
+    <p id="n3">区域三</p>
+  </div>
+  <script>
+    (async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 340;
+      const ctx = canvas.getContext('2d');
+      const stream = canvas.captureStream(10);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+      const stopped = new Promise(r => { recorder.onstop = r; });
+      let frame = 0;
+      const draw = () => {
+        ctx.fillStyle = '#172033';
+        ctx.fillRect(0, 0, 640, 340);
+        ctx.fillStyle = '#7ec8ff';
+        ctx.font = '26px sans-serif';
+        ctx.fillText('stream test ' + frame, 40, 170);
+        frame++;
+        if (frame < 40) requestAnimationFrame(draw);
+      };
+      draw();
+      recorder.start(80);
+      setTimeout(() => recorder.stop(), 1600);
+      await stopped;
+      const video = document.getElementById('demoVideo');
+      video.src = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+      video.play().catch(() => {});
+    })();
+  </script>
+</body>
+</html>

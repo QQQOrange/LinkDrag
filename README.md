@@ -1,8 +1,8 @@
 # LinkDrag
 
-**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.1.15**.
+**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.1.17**.
 
-**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.1.15**。
+**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.1.17**。
 
 <p>
   <a href="#中文">简体中文</a> ·
@@ -67,7 +67,7 @@
 
 #### 从 ZIP 安装（开发版）
 
-1. 下载 `dist/LinkDrag-v1.1.15.zip` 并解压。
+1. 下载 `dist/LinkDrag-v1.1.17.zip` 并解压。
 2. 打开 `edge://extensions` 或 `chrome://extensions`。
 3. 开启右上角「开发人员模式」。
 4. 点击「加载解压缩的扩展」，选择解压后的 `LinkDrag` 文件夹。
@@ -187,7 +187,7 @@ LinkDrag/
 
 ### 版本
 
-**v1.1.15** — 首个 LinkDrag 正式版本。
+**v1.1.17** — 首个 LinkDrag 正式版本。
 
 ---
 
@@ -247,7 +247,7 @@ LinkDrag/
 
 #### Install from ZIP (development build)
 
-1. Download and extract `dist/LinkDrag-v1.1.15.zip`.
+1. Download and extract `dist/LinkDrag-v1.1.17.zip`.
 2. Open `edge://extensions` or `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the extracted `LinkDrag` folder.
@@ -342,7 +342,7 @@ powershell -ExecutionPolicy Bypass -File .\打包ZIP.ps1
 
 ### Version
 
-**v1.1.15** — first official LinkDrag release.
+**v1.1.17** — first official LinkDrag release.
 
 ---
 

@@ -55,7 +55,8 @@ test('summary appearance stylesheet is mounted inside the closed shadow root', (
 
 test('summary uses one content scroller with actions outside it', () => {
   assert.match(built, /const scroll = el\('div', 'summary-scroll'\)/);
-  assert.match(built, /body\.appendChild\(scroll\);\s*body\.appendChild\(actions\);/);
+  // The composer may sit between the scroller and the action bar.
+  assert.match(built, /body\.appendChild\(scroll\);[\s\S]{0,80}body\.appendChild\(actions\);/);
   assert.match(built, /\.summary-scroll\{[^}]*overflow-y:auto!important/);
   assert.doesNotMatch(built, /\.media-summary-answer,\.video-summary-answer\{[^}]*overflow:auto!important/);
 });
