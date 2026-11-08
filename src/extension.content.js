@@ -10115,6 +10115,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (typeof showStreamDots === 'function') showStreamDots(item, out);
     let finished = false;
     let watchdog = 0;
+    let keepAlive = 0;
+    let renderTimer = 0;
     let port = null;
     const releasePort = () => {
       if (item.aiPort === port) item.aiPort = null;
@@ -10126,6 +10128,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       finished = true;
       if (watchdog) clearTimeout(watchdog);
       watchdog = 0;
+      if (keepAlive) clearInterval(keepAlive);
+      keepAlive = 0;
+      if (renderTimer) clearTimeout(renderTimer);
+      renderTimer = 0;
       releasePort();
       fn();
     };
@@ -10147,7 +10153,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (typeof revealSummaryWindow === 'function') revealSummaryWindow(item);
       return;
     }
-    watchdog = setTimeout(() => finishOnce(() => fallbackVideoSummary(item, transcript, '文本模型 90 秒没有返回')), 90000);
+    const armWatchdog = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(() => finishOnce(() => fallbackVideoSummary(item, transcript, '文本模型 90 秒没有返回新内容')), 90000);
+    };
+    armWatchdog();
     const request = {
       action: 'video',
       text: String(transcript || '').slice(0, 20000),
@@ -10169,16 +10179,26 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       return;
     }
     item.aiPort = port;
+    keepAlive = setInterval(() => { try { port.postMessage({ type: 'ping' }); } catch (e) { /* ignore */ } }, 15000);
     const started = Date.now();
     state.answer = '';
+    const renderPartial = () => {
+      if (finished || !out) return;
+      out.innerHTML = markdownToHtml(state.answer);
+      out.classList.add('markdown');
+      if (typeof showStreamDots === 'function') showStreamDots(item, out);
+    };
+    const scheduleRender = () => {
+      if (renderTimer) return;
+      renderTimer = setTimeout(() => { renderTimer = 0; renderPartial(); }, 60);
+    };
     port.onMessage.addListener(msg => {
       if (!msg || finished) return;
       if (msg.type === 'delta') {
         if (!state.answer) out.textContent = '';
         state.answer += String(msg.text || '');
-        out.innerHTML = markdownToHtml(state.answer);
-        out.classList.add('markdown');
-        if (typeof showStreamDots === 'function') showStreamDots(item, out);
+        armWatchdog();
+        scheduleRender();
         if (meta) meta.textContent = '生成中 · 已用 ' + Number(msg.elapsed || ((Date.now() - started) / 1000)).toFixed(1) + ' 秒';
         if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, Math.min(94, 64 + Math.min(30, state.answer.length / 80)), '正在生成总结…');
         return;
@@ -10216,9 +10236,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
     port.onDisconnect.addListener(() => {
       if (finished) return;
-      let lastError = null;
-      try { lastError = EXT.runtime.lastError; } catch (e) { /* ignore */ }
-      if (lastError) finishOnce(() => fallbackVideoSummary(item, transcript, '后台连接断开'));
+      finishOnce(() => fallbackVideoSummary(item, transcript, '后台连接断开'));
     });
     try { port.postMessage({ type: 'start', request }); } catch (e) {
       finishOnce(() => fallbackVideoSummary(item, transcript, '请求发送失败'));
@@ -13069,15 +13087,41 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     try { port = EXT.runtime.connect({ name: 'ldp-ai-stream' }); } catch (e) { finishWithFallback('连接失败'); return; }
     item.aiPort = port;
     let streamDone = false;
-    const streamWatchdog = setTimeout(() => {
-      if (streamDone) return;
+    let streamWatchdog = 0;
+    let keepAlive = 0;
+    let renderTimer = 0;
+    keepAlive = setInterval(() => { try { port.postMessage({ type: 'ping' }); } catch (e) { /* ignore */ } }, 15000);
+    const armStreamWatchdog = () => {
+      if (streamWatchdog) clearTimeout(streamWatchdog);
+      streamWatchdog = setTimeout(() => {
+        if (streamDone) return;
+        streamDone = true;
+        try { port.disconnect(); } catch (e) { /* ignore */ }
+        finishWithFallback('流式总结 90 秒没有返回新内容');
+      }, 90000);
+    };
+    const endStream = () => {
       streamDone = true;
-      try { port.disconnect(); } catch (e) { /* ignore */ }
-      finishWithFallback('流式总结 90 秒没有返回');
-    }, 90000);
-    const endStream = () => { streamDone = true; clearTimeout(streamWatchdog); };
+      if (streamWatchdog) clearTimeout(streamWatchdog);
+      streamWatchdog = 0;
+      if (keepAlive) clearInterval(keepAlive);
+      keepAlive = 0;
+      if (renderTimer) clearTimeout(renderTimer);
+      renderTimer = 0;
+    };
+    armStreamWatchdog();
     const started = Date.now();
     let answer = '';
+    const renderPartial = () => {
+      if (streamDone || !out) return;
+      out.classList.add('markdown');
+      out.innerHTML = markdownToHtml(answer);
+      showStreamDots(item, out);
+    };
+    const scheduleRender = () => {
+      if (renderTimer) return;
+      renderTimer = setTimeout(() => { renderTimer = 0; renderPartial(); }, 60);
+    };
     const request = {
       action: 'video',
       text: text.slice(0, 24000),
@@ -13093,9 +13137,12 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (out) { out.textContent = ''; out.classList.add('streaming'); showStreamDots(item, out); }
     if (typeof markSummaryStep === 'function') markSummaryStepLabel(item, 'media', 'AI 总结', 'active');
     port.onMessage.addListener(msg => {
-      if (!msg) return;      if (msg.type === 'delta') {
+      if (!msg) return;
+      if (msg.type === 'ping') return;
+      if (msg.type === 'delta') {
         answer += String(msg.text || '');
-        if (out) { out.classList.add('markdown'); out.innerHTML = markdownToHtml(answer); showStreamDots(item, out); }
+        armStreamWatchdog();
+        scheduleRender();
         if (status) status.textContent = '正在生成总结 · 已用 ' + Number(msg.elapsed || ((Date.now() - started) / 1000)).toFixed(1) + ' 秒';
         if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, Math.min(96, 82 + Math.min(14, answer.length / 100)), '正在生成总结…');
         return;
@@ -13122,6 +13169,12 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         item.aiPort = null;
         finishWithFallback(String(msg.detail || msg.reason || '流式请求失败'));
       }
+    });
+    port.onDisconnect.addListener(() => {
+      if (streamDone) return;
+      endStream();
+      item.aiPort = null;
+      finishWithFallback('后台连接断开');
     });
     try { port.postMessage({ type: 'start', request }); } catch (e) { endStream(); finishWithFallback('请求发送失败'); }
   }

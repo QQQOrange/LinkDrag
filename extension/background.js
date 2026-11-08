@@ -1387,26 +1387,45 @@ async function streamAI(request, port) {
   const provider = String(request.provider || cfg.provider || '');
   const endpoint = normalizeUrl(request.endpoint !== undefined ? request.endpoint : cfg.endpoint);
   const key = String((cfg.apiKeys && provider && cfg.apiKeys[provider]) || (provider === cfg.provider ? cfg.apiKey : '') || '').trim();
-  const fail = (reason, detail) => { try { aiStreamControllers.delete(port); port.postMessage({ type: 'error', reason, detail: detail || '' }); } catch (e) { /* disconnected */ } };
+  let timer = 0;
+  let keepAliveTimer = 0;
+  const stopTimers = () => {
+    if (timer) { clearTimeout(timer); timer = 0; }
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = 0; }
+  };
+  const fail = (reason, detail) => {
+    stopTimers();
+    try { aiStreamControllers.delete(port); port.postMessage({ type: 'error', reason, detail: detail || '' }); } catch (e) { /* disconnected */ }
+  };
   if (!endpoint) { fail('missing-config'); return; }
   if (!key && /api\.(?:deepseek|openai)\.com/i.test(endpoint)) { fail('missing-key'); return; }
   const prompt = aiPrompt(request || {});
   const model = String(request.model || cfg.model || DEFAULT_AI_CONFIG.model).slice(0, 120);
   const controller = new AbortController();
   aiStreamControllers.set(port, controller);
-  const timer = setTimeout(() => controller.abort(), 120000);
   const started = Date.now();
   const startedAt = started;
+  // The provider can pause for tens of seconds after a partial answer.  A
+  // heartbeat keeps the MV3 worker and its message port alive during that gap.
+  keepAliveTimer = setInterval(() => {
+    try { port.postMessage({ type: 'ping', elapsed: (Date.now() - started) / 1000 }); } catch (e) { /* disconnected */ }
+  }, 15000);
+  const armTimer = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), 120000);
+  };
+  armTimer();
   let sent = false;
   let full = '';
   const sendDelta = text => {
     if (!text) return;
     full += text;
     sent = true;
+    armTimer();
     try { port.postMessage({ type: 'delta', text, elapsed: (Date.now() - started) / 1000 }); } catch (e) { /* disconnected */ }
   };
   const finish = usage => {
-    clearTimeout(timer);
+    stopTimers();
     aiStreamControllers.delete(port);
     try { port.postMessage({ type: 'done', elapsed: (Date.now() - startedAt) / 1000, model, usage: usage || null, chars: full.length }); } catch (e) { /* disconnected */ }
   };
@@ -1430,7 +1449,7 @@ async function streamAI(request, port) {
     });
     if (!res.ok) {
       const raw = await res.text();
-      clearTimeout(timer);
+      stopTimers();
       fail('http', 'HTTP ' + res.status + (raw ? '：' + raw.slice(0, 240) : ''));
       return;
     }
@@ -1440,7 +1459,7 @@ async function streamAI(request, port) {
       let data = null;
       try { data = JSON.parse(raw); } catch (e) { data = null; }
       const text = responseText(data);
-      if (!text) { clearTimeout(timer); fail('invalid-response', '接口没有返回可读文本'); return; }
+      if (!text) { stopTimers(); fail('invalid-response', '接口没有返回可读文本'); return; }
       sendDelta(text);
       finish(data && data.usage);
       return;
@@ -1470,12 +1489,12 @@ async function streamAI(request, port) {
     }
     buffer += decoder.decode();
     for (const line of buffer.split(/\r?\n/)) handleLine(line);
-    clearTimeout(timer);
+    stopTimers();
     if (!sent) { fail('invalid-response', '接口没有返回可读文本'); return; }
     finish(usage);
   } catch (e) {
-    clearTimeout(timer);
-    if (e && e.name === 'AbortError') fail('timeout', '请求超过 120 秒');
+    stopTimers();
+    if (e && e.name === 'AbortError') fail('timeout', '流式输出已 120 秒没有新内容');
     else fail('network', e && e.message ? String(e.message).slice(0, 180) : '');
   }
 }
