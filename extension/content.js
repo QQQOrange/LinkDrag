@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.1.7
+/* LinkDrag — Chromium extension v1.1.14
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.1.7 and writes extension/content.js.
+ * manifest version into 1.1.14 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.1.7'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.1.7', name: '' }; }
+      return { version: String(m.version || '1.1.14'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.1.14', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -25,9 +25,11 @@
   // before drop; the old 1.5s URL dedupe expired on slow drags and opened a
   // second identical window.
   window.__LPS_DRAG_GUARD__ = null;
+  window.__LPS_TEXT_DRAG__ = false;
   window.__LPS_LAST_OPEN__ = 0;
   window.addEventListener('mousedown', event => {
     try {
+      window.__LPS_TEXT_DRAG__ = false;
       const target = event.target;
       if (target && target.closest && (target.closest('a[href]') || target.closest('img'))) {
         // The gesture layer may open the preview on mousemove, before the
@@ -39,16 +41,29 @@
   }, true);
   window.addEventListener('dragstart', event => {
     try {
-      const target = event.target;
-      if (target && target.closest && (target.closest('a[href]') || target.closest('img'))) {
-        if (!window.__LPS_DRAG_GUARD__) window.__LPS_DRAG_GUARD__ = { time: Date.now(), dragging: true };
-        else window.__LPS_DRAG_GUARD__.dragging = true;
-      } else {
+      // A native drag of selected text also carries text/plain.  Previews are
+      // only valid when the drag starts on an actual link or image; everything
+      // else (including a selection inside a paragraph) is native text drag.
+      let target = event.target;
+      if (target && target.nodeType === 3) target = target.parentElement;
+      const previewSource = target && target.closest && target.closest('a[href],img');
+      if (!previewSource || selectionTouchesEvent(event)) {
+        window.__LPS_TEXT_DRAG__ = true;
         window.__LPS_DRAG_GUARD__ = null;
+        return;
       }
-    } catch (e) { window.__LPS_DRAG_GUARD__ = null; }
+      window.__LPS_TEXT_DRAG__ = false;
+      if (!window.__LPS_DRAG_GUARD__) window.__LPS_DRAG_GUARD__ = { time: Date.now(), dragging: true };
+      else window.__LPS_DRAG_GUARD__.dragging = true;
+    } catch (e) {
+      window.__LPS_TEXT_DRAG__ = false;
+      window.__LPS_DRAG_GUARD__ = null;
+    }
   }, true);
-  window.addEventListener('dragend', () => { window.__LPS_DRAG_GUARD__ = null; }, true);
+  window.addEventListener('dragend', () => {
+    window.__LPS_TEXT_DRAG__ = false;
+    window.__LPS_DRAG_GUARD__ = null;
+  }, true);
 /* ----------------------------------------------------------------------------------
  *  关于编辑器里那些黄色三角：那不是运行期错误，是油猴编辑器自带的 JSHint 按默认
  *  esversion 5 逐行报的「'const' / 箭头函数 / 模板字符串 is only available in ES6」
@@ -330,7 +345,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.1.7';
+    return '1.1.14';
   })();
 
   const TOP = window.self === window.top;
@@ -1825,8 +1840,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .window.summary-window[data-summary-dock="right"] .panel{border-radius:var(--r-win) 0 0 var(--r-win)!important}
 .window.summary-window[data-summary-dock="left"] .panel{border-radius:0 var(--r-win) var(--r-win) 0!important}
 .window.summary-window[data-summary-dock="free"] .panel{border-radius:var(--r-win)!important}
-.window.summary-window .panel-head{cursor:grab;user-select:none;touch-action:none}
-.window.summary-window .panel-head:active{cursor:grabbing}
+.window.summary-window .panel-head{cursor:default;user-select:none;touch-action:none}
+.window.summary-window[data-summary-dock="free"] .panel-head{cursor:grab}
+.window.summary-window[data-summary-dock="free"] .panel-head:active{cursor:grabbing}
 .window.settings-standalone{left:0!important;top:0!important;width:100%!important;height:100%!important;border-radius:0!important;border:0!important;box-shadow:none!important;background:var(--bg)!important}
 .window.settings-standalone .header,.window.settings-standalone .toolbar,.window.settings-standalone .content,.window.settings-standalone .resize{display:none!important}
 .window.settings-standalone .panel{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important;overflow:auto!important}
@@ -1986,6 +2002,27 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return null;
   }
 
+  function selectionIntersectsElement(selection, element) {
+    if (!selection || selection.isCollapsed || !selection.rangeCount || !element) return false;
+    const node = element.nodeType === 3 ? element.parentElement : element;
+    if (!node || node.nodeType !== 1) return false;
+    try { return selection.containsNode(node, true); } catch (e) { return false; }
+  }
+  /** True while the current mouse/drag gesture is moving selected page text. */
+  function selectionTouchesEvent(event) {
+    const target = event && event.target;
+    if (target && /^(INPUT|TEXTAREA)$/.test(String(target.tagName || '').toUpperCase())
+      && Number(target.selectionStart) !== Number(target.selectionEnd)) return true;
+    let selection = null;
+    try { selection = window.getSelection ? window.getSelection() : null; } catch (e) { selection = null; }
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return false;
+    const path = event && event.composedPath ? event.composedPath() : [target];
+    for (const node of path) {
+      if (selectionIntersectsElement(selection, node)) return true;
+    }
+    return false;
+  }
+
   /**
    * 链接预热。拖拽触发是「位移 + 按住时长」双条件，从按下到窗口出现客观上有一段等待；
    * 位移过半阈值时用户意图已经明确（是「拖」不是「选」），此时补 preconnect + prefetch，
@@ -2090,6 +2127,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     window.addEventListener('mousedown', event => {
       reset();
       if (event.button !== 0 || modifiers(event) || !allowed(event)) return;
+      if (selectionTouchesEvent(event)) return;
       const link = findLink(event);
       if (!link) return;
       candidate = Object.assign({}, link, {
@@ -2118,6 +2156,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     window.addEventListener('mousemove', event => {
       if (!candidate) return;
       if (!(event.buttons & 1) || modifiers(event) || !allowed(event)) { reset(); return; }
+      try {
+        if (selectionIntersectsElement(window.getSelection && window.getSelection(), candidate.element)) { reset(); return; }
+      } catch (e) { /* ignore */ }
       const c = candidate;
       c.lastX = event.clientX;
       c.lastY = event.clientY;
@@ -2144,6 +2185,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       }
     }, true);
     window.addEventListener('dragstart', event => {
+      if (selectionTouchesEvent(event)) { reset(); return; }
       const link = findLink(event);
       if (!link) return;
       // 原生拖拽同样受「按住时长」约束：还没按够就交给页面自己处理
@@ -3706,7 +3748,19 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     runAIAction(item, 'summary', '', out, meta, status);
   }
 
+  function isDouyinShareUrl(value) {
+    try {
+      const url = new URL(String(value || ''), location.href);
+      if (!/^https?:$/i.test(url.protocol)) return false;
+      return /(^|\.)douyin\.com$|(^|\.)iesdouyin\.com$/i.test(url.hostname)
+        && (/\/(?:video|note)\/\d+/i.test(url.pathname) || /^v\.douyin\.com$/i.test(url.hostname));
+    } catch (e) { return false; }
+  }
+
   function openQuickAISummary(value, fallbackTitle, point) {
+    if (isDouyinShareUrl(value) && typeof openDouyinLinkSummary === 'function') {
+      return openDouyinLinkSummary(value, fallbackTitle, point);
+    }
     const directMedia = /\.(mp3|m4a|aac|wav|ogg|opus|mp4|webm|mov|mkv|ts|m4s|m3u8)(?:$|\?)/i.test(String(value || ''));
     if (directMedia && typeof openMediaSummaryFromUrl === 'function') return openMediaSummaryFromUrl(value, fallbackTitle, point);
     // A link-side AI button always means "summarize this web page".  Media
@@ -7063,6 +7117,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     } catch (e) { /* 回退到 setTimeout */ }
     shellWarmHandle = setTimeout(fire, 900);
   }
+  function cancelShellWarm() {
+    if (!shellWarmHandle) return;
+    try {
+      if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(shellWarmHandle);
+    } catch (e) { /* ignore */ }
+    clearTimeout(shellWarmHandle);
+    shellWarmHandle = 0;
+  }
   function scheduleSessionSave() {
     if (!settings.sessionMemory || restoringSession) return;
     if (idleHandle) { try { window.cancelIdleCallback(idleHandle); } catch (e) { /* 忽略 */ } idleHandle = 0; }
@@ -7907,7 +7969,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
   /* ---- 拖放链接 / 网址到页面：直接浮出预览 ------------------------------------------ */
   function hasUrlPayload(dt) {
-    if (!dt) return false;
+    if (!dt || window.__LPS_TEXT_DRAG__) return false;
     const types = Array.from(dt.types || []);
     return types.indexOf('text/uri-list') >= 0 || types.indexOf('text/x-moz-url') >= 0 || types.indexOf('text/plain') >= 0;
   }
@@ -7967,6 +8029,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }, true);
   window.addEventListener('drop', event => {
     endDropSession();
+    if (window.__LPS_TEXT_DRAG__) {
+      window.__LPS_TEXT_DRAG__ = false;
+      return;
+    }
     // v21: an in-page link/image drag is already handled by the gesture layer
     // (often before native dragstart).  The old 1.5s URL filter expired on slow
     // drags, so drop opened an identical second window.  Detect the in-page
@@ -8102,6 +8168,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
     if (!settings.linkButton && !settings.aiQuick) { if (launcher.isShowing()) launcher.hide(); }
     else launcher.handleLeave();
+    // A pass-through link should not pay for building the full shadow-root UI
+    // in the next idle slice.  Build it again on the next real link hover.
+    cancelShellWarm();
     peekLeave();
   }, true);
   window.addEventListener('scroll', () => {
@@ -8411,10 +8480,67 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function imageOriginalVariant(url) {
     try {
       const u = new window.URL(url, location.href);
-      if (!/-\d{2,4}x\d{2,4}\.(?:jpe?g|jfif|png|webp|avif|gif)$/i.test(u.pathname)) return '';
-      const original = u.pathname.replace(/-\d{2,4}x\d{2,4}(\.(?:jpe?g|jfif|png|webp|avif|gif))$/i, '$1');
+      if (!/[-_]\d{2,4}x\d{2,4}\.(?:jpe?g|jfif|png|webp|avif|gif)$/i.test(u.pathname)) return '';
+      const original = u.pathname.replace(/[-_]\d{2,4}x\d{2,4}(\.(?:jpe?g|jfif|png|webp|avif|gif))$/i, '$1');
       return u.origin + original + u.search + u.hash;
     } catch (e) { return ''; }
+  }
+  function imageOriginalVariants(url) {
+    const out = [];
+    const add = value => { const normalized = normalizeImageUrl(value, location.href); if (normalized && out.indexOf(normalized) < 0) out.push(normalized); };
+    add(imageOriginalVariant(url));
+    try {
+      const u = new window.URL(url, location.href);
+      const suffix = u.pathname.replace(/(?:[-_](?:thumb|thumbnail|small|medium|preview|compressed|lowres))(?=\.[a-z0-9]{2,5}$)/i, '');
+      if (suffix !== u.pathname) add(u.origin + suffix + u.search + u.hash);
+      const bareThumb = u.pathname.replace(/\/thumb(?:nail)?\//i, '/');
+      if (bareThumb !== u.pathname) add(u.origin + bareThumb + u.search + u.hash);
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+  function imageUrlsFromHtml(html, base) {
+    const out = [];
+    const add = value => {
+      const url = normalizeImageUrl(String(value || '')
+        .replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/gi, '&'), base);
+      if (!url || out.indexOf(url) >= 0 || out.length >= 8) return;
+      out.push(url);
+    };
+    const source = String(html || '');
+    const attrValue = (tag, name) => {
+      const match = String(tag || '').match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i'));
+      return match ? match[1] : '';
+    };
+    const metaPattern = /<meta\b[^>]*>/ig;
+    let meta;
+    while ((meta = metaPattern.exec(source)) && out.length < 8) {
+      const key = attrValue(meta[0], 'property') || attrValue(meta[0], 'name');
+      if (!/^(?:og:image(?::url|:secure_url)?|twitter:image(?::src)?)$/i.test(key)) continue;
+      add(attrValue(meta[0], 'content'));
+    }
+    const linkPattern = /<link\b[^>]*>/ig;
+    let link;
+    while ((link = linkPattern.exec(source)) && out.length < 8) {
+      const rel = attrValue(link[0], 'rel').toLowerCase();
+      const as = attrValue(link[0], 'as').toLowerCase();
+      if (rel === 'image_src' || (rel === 'preload' && as === 'image')) add(attrValue(link[0], 'href'));
+    }
+    const jsonImage = /"image"\s*:\s*(?:"([^"]+)"|\[\s*"([^"]+)")/ig;
+    let jsonMatch;
+    while ((jsonMatch = jsonImage.exec(source)) && out.length < 8) add(jsonMatch[1] || jsonMatch[2]);
+    return out;
+  }
+  const imagePageCache = new Map();
+  function imagePageCandidates(pageUrl) {
+    const target = httpUrl(pageUrl);
+    if (!target) return Promise.resolve([]);
+    if (imagePageCache.has(target)) return imagePageCache.get(target);
+    const promise = (typeof videoFetchText === 'function' ? videoFetchText(target) : Promise.resolve(''))
+      .then(html => imageUrlsFromHtml(html, target))
+      .catch(() => []);
+    imagePageCache.set(target, promise);
+    if (imagePageCache.size > 24) imagePageCache.delete(imagePageCache.keys().next().value);
+    return promise;
   }
   function imageTitleFromUrl(url) {
     try {
@@ -8482,16 +8608,47 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
     const anchor = img.closest ? img.closest('a[href]') : null;
     const holder = img.closest ? (img.closest('[data-image],[data-full],[data-original],[data-src]') || anchor) : anchor;
-    // 1) Explicit full-size attributes are the strongest signal.
-    for (const name of ['data-full', 'data-original', 'data-large', 'data-large-file',
-      'data-zoom-image', 'data-hi-res-src', 'data-image']) {
-      if (holder && holder !== img) add(holder.getAttribute(name));
-      add(img.getAttribute(name));
+    let sourcePageUrl = '';
+    // 1) Explicit full-size attributes are the strongest signal.  Check a few
+    // ancestors, not just the immediate card: galleries often put data-full on
+    // the figure while the thumbnail itself only has a small src.
+    const fullAttrs = ['data-full', 'data-full-src', 'data-original', 'data-original-src',
+      'data-large', 'data-large-file', 'data-large-src', 'data-zoom-image', 'data-zoom-src',
+      'data-hi-res', 'data-hi-res-src', 'data-actualsrc', 'data-image'];
+    let attrNode = img;
+    for (let depth = 0; attrNode && depth < 5; depth++, attrNode = attrNode.parentElement) {
+      for (const name of fullAttrs) add(attrNode.getAttribute && attrNode.getAttribute(name));
+      if (depth <= 1 && attrNode.querySelectorAll) {
+        let nested = 0;
+        for (const fullNode of attrNode.querySelectorAll('[data-full],[data-full-src],[data-original],[data-original-src],[data-large],[data-large-src],[data-zoom-image],[data-zoom-src],[data-actualsrc]')) {
+          if (nested++ >= 6) break;
+          for (const name of fullAttrs) add(fullNode.getAttribute(name));
+        }
+      }
     }
     // 2) The wrapping link usually points at the full image on image sites.
+    // If it points at a viewer page, remember it so metadata can supply the
+    // original instead of enlarging the thumbnail.
     if (anchor) {
       const href = anchor.getAttribute('href');
       if (href && looksLikeImageUrl(href)) add(href);
+      else {
+        const pageUrl = httpUrl(href, anchor.baseURI || base);
+        if (pageUrl && pageUrl.split('#')[0] !== String(location.href || '').split('#')[0]) sourcePageUrl = pageUrl;
+      }
+    }
+    const linkScope = anchor || img.parentElement;
+    if (linkScope && linkScope.querySelectorAll) {
+      let linkCount = 0;
+      for (const link of linkScope.querySelectorAll('a[href]')) {
+        if (linkCount++ >= 8) break;
+        const href = link.getAttribute('href');
+        if (href && looksLikeImageUrl(href)) add(href);
+        else if (!sourcePageUrl) {
+          const pageUrl = httpUrl(href, link.baseURI || base);
+          if (pageUrl && pageUrl.split('#')[0] !== String(location.href || '').split('#')[0]) sourcePageUrl = pageUrl;
+        }
+      }
     }
     // 3) Largest srcset candidate from <img> and <picture><source>.
     parseImageSrcset(img.getAttribute('data-srcset'), base).forEach(add);
@@ -8511,8 +8668,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     // 5) Current / declared sources.  A WordPress-style "-300x200" thumbnail
     //    gets an original-size sibling inserted before it.
     const current = normalizeImageUrl(img.currentSrc || img.getAttribute('src') || '', base);
-    const original = current ? imageOriginalVariant(current) : '';
-    if (original) add(original);
+    if (current) imageOriginalVariants(current).forEach(add);
     add(current);
     add(img.getAttribute('src'));
     if (!list.length) return null;
@@ -8524,6 +8680,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       candidates: list,
       title: title.slice(0, 300),
       sourceUrl: location.href,
+      sourcePageUrl: sourcePageUrl,
       width: Number(img.naturalWidth) || 0,
       height: Number(img.naturalHeight) || 0
     };
@@ -8555,9 +8712,40 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       candidates: list,
       title: title,
       sourceUrl: httpUrl(raw.sourceUrl) || '',
+      sourcePageUrl: httpUrl(raw.sourcePageUrl) || '',
       width: Number(raw.width) || 0,
       height: Number(raw.height) || 0
     };
+  }
+  function mergeImageViewerCandidates(item, extra, pageUrl) {
+    if (!item || item.closed || !Array.isArray(extra) || !extra.length) return;
+    const seen = Object.create(null);
+    const merged = [];
+    for (const value of extra.concat(item.imageCandidates || [])) {
+      const url = normalizeImageUrl(value, item.imageSourceUrl || location.href);
+      if (!url || seen[url]) continue;
+      seen[url] = 1;
+      merged.push(url);
+      if (merged.length >= 12) break;
+    }
+    const previous = item.imageCandidates || [];
+    if (!merged.length || (merged.length === previous.length && merged[0] === previous[0])) return;
+    item.imagePageResolvedFor = pageUrl;
+    item.imageCandidates = merged;
+    const first = merged[0];
+    if (first && first !== item.imageUrl) {
+      item.imageCandidateIndex = 0;
+      loadImageViewerCandidate(item);
+    }
+  }
+  function upgradeImageViewerFromPage(item, pageUrl) {
+    const target = httpUrl(pageUrl);
+    if (!item || item.closed || !target || item.imagePageResolvedFor === target) return;
+    item.imagePageResolvedFor = target;
+    imagePageCandidates(target).then(urls => {
+      if (!item || item.closed || !urls.length) return;
+      mergeImageViewerCandidates(item, urls, target);
+    }).catch(() => { /* thumbnail remains usable */ });
   }
   function openImagePreview(info, event) {
     const image = normalizeImageInfo(info);
@@ -8653,7 +8841,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (item.closed || item.imageLoadToken !== token) return;
       item.imageCandidateIndex++;
       loadImageViewerCandidate(item);
-    }, Math.min(25000, Math.max(3000, (item.imageLoadDeadline || Date.now()) - Date.now())));
+    }, Math.min(item.imageCandidates.length > 1 ? 10000 : 25000, Math.max(3000, (item.imageLoadDeadline || Date.now()) - Date.now())));
     img.onload = () => {
       if (item.closed || item.imageLoadToken !== token) return;
       clearTimeout(item.imageLoadTimer);
@@ -8752,6 +8940,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       });
     }
     loadImageViewerCandidate(item);
+    if (info.sourcePageUrl) upgradeImageViewerFromPage(item, info.sourcePageUrl);
   }
   function reloadImageViewer(item) {
     if (!item || item.closed || !item.imageMode) return;
@@ -8810,6 +8999,16 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           return false;
         }
         const opened = openPageOrMediaSummary();
+        extRespond(sendResponse, opened ? { ok: true, id: opened.id } : { ok: false, reason: 'open-failed' });
+        return false;
+      }
+      if (type === 'ldp:summary-link') {
+        const target = httpUrl(message.url);
+        if (!target || !interactionEnabled()) {
+          extRespond(sendResponse, { ok: false, reason: interactionDisabledReason() || 'invalid-url' });
+          return false;
+        }
+        const opened = openQuickAISummary(target, isStr(message.title) ? message.title.slice(0, 300) : '', undefined);
         extRespond(sendResponse, opened ? { ok: true, id: opened.id } : { ok: false, reason: 'open-failed' });
         return false;
       }
@@ -8941,6 +9140,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   // !TOP branch and forwards plain image data to this frame.
   window.addEventListener('dragstart', event => {
     if (!settings.imageDragPreview || !interactionEnabled()) return;
+    if (selectionTouchesEvent(event)) return;
     if (event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (shell && targetInHost(event, shell.host)) return;
     if (!pageInteractionAllowed(event)) return;
@@ -8986,8 +9186,48 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   let videoAIButton = null;
   let videoAICurrent = null;
   let videoAIHideTimer = 0;
+  let videoAIShowToken = 0;
   let videoAIPointer = { x: -1, y: -1 };
   const videoAIInRect = (rect, x, y) => !!rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+
+  function isVideoSummaryEligible(video) {
+    if (!video || !video.isConnected || !/^(VIDEO|AUDIO)$/.test(String(video.tagName || '').toUpperCase())) return false;
+    const tag = String(video.tagName).toUpperCase();
+    let rect = null;
+    try { rect = video.getBoundingClientRect(); } catch (e) { return false; }
+    if (!rect) return false;
+    const minWidth = tag === 'AUDIO' ? 120 : 240;
+    const minHeight = tag === 'AUDIO' ? 20 : 120;
+    if (rect.width < minWidth || rect.height < minHeight) return false;
+    if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
+    const visibleW = Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0);
+    const visibleH = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
+    if (visibleW * visibleH < rect.width * rect.height * 0.3) return false;
+    try {
+      const style = window.getComputedStyle(video);
+      if (!style || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) < 0.05) return false;
+    } catch (e) { /* keep going */ }
+    try {
+      const chrome = video.closest([
+        '[data-e2e*="comment" i]', '[data-e2e*="reply" i]', '[data-e2e*="notif" i]', '[data-e2e*="notice" i]',
+        '[class*="comment" i]', '[class*="reply" i]', '[class*="notif" i]', '[class*="toast" i]',
+        '[class*="message-list" i]', '[class*="chat-room" i]', '[class*="emoji" i]', '[class*="sticker" i]',
+        '[class*="effect-preview" i]', '[class*="advert" i]', '[class*="sponsor" i]',
+        '[aria-label*="评论"]', '[aria-label*="通知"]', '[role="tooltip"]'
+      ].join(','));
+      if (chrome) return false;
+    } catch (e) { /* ignore invalid selectors */ }
+    if (/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
+      try {
+        if (!video.closest('[data-e2e="feed-active-video"],[data-e2e="feed-video"],[data-e2e="video-player"],[data-e2e="video-detail"],#sliderVideo,.xgplayer')) return false;
+      } catch (e) { return false; }
+      // A feed card or author preview can be large enough for the generic
+      // minimum yet much smaller than the real player.  It was the cause of
+      // the button briefly appearing beside the author avatar before jumping.
+      if (tag !== 'AUDIO' && rect.width * rect.height < window.innerWidth * window.innerHeight * 0.18) return false;
+    }
+    return true;
+  }
 
   function ensureVideoAI() {
     if (videoAIHost && videoAIHost.isConnected) return true;
@@ -9002,6 +9242,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     button.type = 'button';
     button.tabIndex = -1;
     button.className = 'ldp-video-ai';
+    // Never paint at the shadow host's default (0,0) while the player layout
+    // settles; positionVideoAI() will place it before it is unhidden.
+    button.style.left = '-9999px';
+    button.style.top = '-9999px';
     button.title = 'AI 总结视频内容';
     button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7L12 3Z"/><path d="M5 16.5 5.8 18.2 7.5 19l-1.7.8L5 21.5l-.8-1.7L2.5 19l1.7-.8L5 16.5Z"/><path d="M19 14.5l.7 1.5 1.5.7-1.5.7-.7 1.5-.7-1.5-1.5-.7 1.5-.7.7-1.5Z"/></svg><span>AI 总结</span>';
     button.hidden = true;
@@ -9021,7 +9265,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       isolateButtonEvent(event);
       // Douyin's recommendation feed can replace <video> nodes without a page
       // reload.  Never open the summary against a stale detached node.
-      const video = (videoAICurrent && videoAICurrent.isConnected)
+      const video = (videoAICurrent && videoAICurrent.isConnected && isVideoSummaryEligible(videoAICurrent))
         ? videoAICurrent
         : findActiveVideoElement();
       hideVideoAI();
@@ -9066,9 +9310,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
 
   function positionVideoAI(video) {
-    if (!videoAIButton) return false;
+    if (!videoAIButton || !isVideoSummaryEligible(video)) return false;
     const rect = videoAIRect(video);
-    if (!rect || rect.width < 120 || rect.height < 32 || rect.bottom < 0 || rect.top > window.innerHeight) return false;
+    if (!rect) return false;
     const width = 128;
     let left = rect.right - width - 9;
     if (left < 6) left = rect.left + 8;
@@ -9082,16 +9326,44 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
 
   function showVideoAI(video) {
-    if (!settings.videoAI || !video || !/^(VIDEO|AUDIO)$/.test(String(video.tagName || '').toUpperCase())) return;
+    if (!settings.videoAI) return;
+    if (!isVideoSummaryEligible(video)) { hideVideoAI(); return; }
     if (!ensureVideoAI()) return;
-    if (!positionVideoAI(video)) { hideVideoAI(); return; }
-    videoAICurrent = video;
-    videoAIButton.hidden = false;
-    refreshVideoAITheme();
-    clearTimeout(videoAIHideTimer);
+    if (videoAICurrent === video && !videoAIButton.hidden) {
+      if (positionVideoAI(video)) refreshVideoAITheme();
+      clearTimeout(videoAIHideTimer);
+      return;
+    }
+    // Douyin swaps between its feed card and full-screen player a few frames
+    // after mouseover.  Showing on the first frame made the button appear near
+    // the author avatar and then jump to the player's top-right corner.  Wait
+    // until the player's viewport rect is stable before revealing it.
+    const token = ++videoAIShowToken;
+    videoAIButton.hidden = true;
+    let last = null;
+    let stable = 0;
+    const check = () => {
+      if (token !== videoAIShowToken) return;
+      if (!video || !video.isConnected || !isVideoSummaryEligible(video)) { hideVideoAI(); return; }
+      const rect = videoAIRect(video);
+      if (!rect) { hideVideoAI(); return; }
+      if (last && Math.abs(last.left - rect.left) < 2 && Math.abs(last.top - rect.top) < 2
+        && Math.abs(last.width - rect.width) < 2 && Math.abs(last.height - rect.height) < 2) stable++;
+      else stable = 0;
+      last = rect;
+      if (stable < 3) { requestAnimationFrame(check); return; }
+      if (videoAIPointer.x >= 0 && !videoAIInRect(rect, videoAIPointer.x, videoAIPointer.y)) { hideVideoAI(); return; }
+      if (token !== videoAIShowToken || !positionVideoAI(video)) { hideVideoAI(); return; }
+      videoAICurrent = video;
+      videoAIButton.hidden = false;
+      refreshVideoAITheme();
+      clearTimeout(videoAIHideTimer);
+    };
+    requestAnimationFrame(check);
   }
 
   function hideVideoAI() {
+    videoAIShowToken++;
     clearTimeout(videoAIHideTimer);
     videoAIHideTimer = 0;
     videoAICurrent = null;
@@ -9106,7 +9378,19 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       const videoRect = videoAIRect(videoAICurrent);
       if (videoAIInRect(buttonRect, event.clientX, event.clientY) || videoAIInRect(videoRect, event.clientX, event.clientY)) {
         clearTimeout(videoAIHideTimer);
+        return;
       }
+      // Video players often sit under a control/notification overlay, so the
+      // video never receives mouseout.  Hide based on the pointer leaving both
+      // rectangles, not on the event target.
+      clearTimeout(videoAIHideTimer);
+      videoAIHideTimer = setTimeout(() => {
+        if (!videoAICurrent || !videoAIButton || videoAIButton.hidden) return;
+        const br = videoAIButton.getBoundingClientRect();
+        const vr = videoAIRect(videoAICurrent);
+        if (videoAIInRect(br, videoAIPointer.x, videoAIPointer.y) || videoAIInRect(vr, videoAIPointer.x, videoAIPointer.y)) return;
+        hideVideoAI();
+      }, 700);
     }, true);
     document.addEventListener('mouseover', event => {
       if (!settings.videoAI) return;
@@ -9132,17 +9416,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     window.addEventListener('resize', () => { if (videoAICurrent) positionVideoAI(videoAICurrent); }, true);
     const scanVisibleVideo = () => {
       if (!settings.videoAI) { hideVideoAI(); return; }
-      if (videoAICurrent && !videoAICurrent.isConnected) hideVideoAI();
-      if (videoAICurrent) {
-        if (positionVideoAI(videoAICurrent)) videoAIButton.hidden = false;
-        else hideVideoAI();
-      }
-      if (videoAICurrent) return;
-      const videos = Array.from(document.querySelectorAll('video,audio')).filter(video => {
-        const rect = videoAIRect(video);
-        return rect && rect.width >= 160 && rect.height >= 40 && rect.bottom > 0 && rect.top < window.innerHeight;
-      });
-      if (videos.length) showVideoAI(videos[0]);
+      if (!videoAICurrent) return;
+      if (!videoAICurrent.isConnected || !isVideoSummaryEligible(videoAICurrent)) { hideVideoAI(); return; }
+      if (positionVideoAI(videoAICurrent)) videoAIButton.hidden = false;
+      else hideVideoAI();
     };
     setTimeout(scanVisibleVideo, 900);
     window.addEventListener('load', scanVisibleVideo, { once: true });
@@ -9792,6 +10069,25 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return candidates[0] ? { text: candidates[0], source: '页面字幕区域' } : null;
   }
 
+  function subtitleProbeBudget(video) {
+    const host = String(location.hostname || '');
+    try {
+      if (video && video.textTracks && video.textTracks.length) return 12000;
+    } catch (e) { /* ignore */ }
+    try {
+      if (video && video.querySelector && video.querySelector('track[src]')) return 12000;
+    } catch (e) { /* ignore */ }
+    // Douyin/TikTok descriptions and chapter cards are not subtitle tracks.
+    // Only skip the wait after ruling out a real native track above.
+    if (/douyin\.com|iesdouyin\.com|tiktok\.com/i.test(host)) return 0;
+    // YouTube/Bilibili fetch captions through their APIs, which can be slower
+    // but are often available even without a visible <track> element.
+    if (/youtube\.com|youtu\.be|bilibili\.com/i.test(host)) return 12000;
+    // Generic pages may render subtitles into DOM nodes.  Give them a short
+    // probe, then move to ASR instead of blocking the panel for 20 seconds.
+    return 3500;
+  }
+
   async function collectVideoTranscript(video) {
     try {
       const native = await nativeVideoTranscript(video);
@@ -9871,6 +10167,12 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (!text) { toast(item, '还没有可复制的总结'); return; }
       copySummaryText(item, text, '已复制总结');
     });
+    const videoDownload = el('button', 'text-button summary-action-secondary', '下载视频');
+    videoDownload.type = 'button';
+    videoDownload.addEventListener('click', () => downloadVideoFromSummary(item));
+    const audioDownload = el('button', 'text-button summary-action-secondary', '下载音频');
+    audioDownload.type = 'button';
+    audioDownload.addEventListener('click', () => downloadAudioFromSummary(item));
     const subtitleDownload = el('button', 'text-button summary-subtitle-button summary-action-primary', '下载字幕 SRT');
     subtitleDownload.type = 'button';
     subtitleDownload.hidden = true;
@@ -9878,6 +10180,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const retry = el('button', 'text-button', '重新总结');
     retry.type = 'button';
     retry.addEventListener('click', () => startVideoSummary(item));
+    actions.appendChild(videoDownload);
+    actions.appendChild(audioDownload);
     actions.appendChild(subtitleDownload);
     actions.appendChild(copy);
     actions.appendChild(retry);
@@ -9972,16 +10276,22 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     (async () => {
       let result = null;
       let subtitleTicker = 0;
+      const subtitleBudget = subtitleProbeBudget(state.info.video);
       try {
-        subtitleTicker = setInterval(() => {
-          if (!item || item.closed || !state.busy) return;
-          const elapsed = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
-          if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, Math.min(48, 10 + elapsed * 2), '正在读取并解析视频字幕…');
-        }, 1000);
-        result = await Promise.race([
-          collectVideoTranscript(state.info.video),
-          new Promise(resolve => setTimeout(() => resolve(null), 20000))
-        ]);
+        if (subtitleBudget) {
+          subtitleTicker = setInterval(() => {
+            if (!item || item.closed || !state.busy) return;
+            const elapsed = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
+            if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, Math.min(48, 10 + elapsed * 2), '正在读取并解析视频字幕…');
+          }, 1000);
+          result = await Promise.race([
+            collectVideoTranscript(state.info.video),
+            new Promise(resolve => setTimeout(() => resolve(null), subtitleBudget))
+          ]);
+        } else if (status) {
+          status.textContent = '未检测到字幕，改用音视频模型…';
+          if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, 20, '未检测到字幕，改用音视频模型…');
+        }
       } catch (e) { result = null; }
       finally { if (subtitleTicker) clearInterval(subtitleTicker); }
       if (item.closed) return;
@@ -10317,6 +10627,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   let summaryLoadingItem = null;
   const douyinCapturedUrls = [];
   const genericCapturedUrls = [];
+  const douyinDetailCache = new Map();
 
   window.addEventListener('message', event => {
     if (event.source !== window || !event.data) return;
@@ -10544,6 +10855,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function cleanupMediaResources(item) {
     if (!item) return;
     item.summaryResourcesCleared = true;
+    if (item.mediaState) item.mediaState.mseChunksPromise = null;
     if (item.aiPort) { try { item.aiPort.disconnect(); } catch (e) { /* ignore */ } item.aiPort = null; }
     if (item.ui && item.ui.summaryEdgeTab) { try { item.ui.summaryEdgeTab.remove(); } catch (e) { /* ignore */ } item.ui.summaryEdgeTab = null; }
     douyinCapturedUrls.length = 0;
@@ -10712,6 +11024,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
   function scanMediaCandidates() {
     const list = [];
+    const douyinHost = /douyin\.com|iesdouyin\.com/i.test(location.hostname);
     if (/x\.com|twitter\.com/i.test(location.hostname)) {
       const directTwitter = twitterDirectMediaUrls();
       for (const url of directTwitter) {
@@ -10728,7 +11041,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         const source = node.querySelector('source[src]');
         if (source) src = String(source.src || source.getAttribute('src') || '');
       }
-      if (!src && /douyin\.com/i.test(location.hostname)) src = resolveDouyinMediaUrl();
+      // Never invent a URL for a Douyin player with no source.  The feed keeps
+      // several preloaded nodes; borrowing an unbound CDN URL here used to make
+      // a hidden effect/ad clip look like the video the user clicked.
       const rect = (() => { try { return node.getBoundingClientRect(); } catch (e) { return null; } })();
       if (kind === 'video') {
         if (!rect || rect.width < 160 || rect.height < 80 || rect.bottom < 0 || rect.top > window.innerHeight) continue;
@@ -10753,7 +11068,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     for (const declared of pageDeclaredMediaUrls()) {
       if (list.some(candidate => candidate.url === declared.url)) continue;
       const kind = mediaUrlKind(declared.url, 'video');
-      list.push({ element: null, kind: kind === 'audio' ? 'audio' : 'video', url: declared.url, srcKind: kind === 'audio' ? 'audio' : 'direct', duration: 0, title: declared.title || document.title || '', visible: true });
+      list.push({ element: null, kind: kind === 'audio' ? 'audio' : 'video', url: declared.url, srcKind: kind === 'audio' ? 'audio' : 'direct', duration: 0, title: declared.title || document.title || '', visible: true, unbound: douyinHost });
     }
     list.sort((a, b) => (a.kind === 'audio' && b.kind !== 'audio' ? -1 : a.kind !== 'audio' && b.kind === 'audio' ? 1 : 0));
     if (!list.some(candidate => candidate.url && !/^blob:/i.test(candidate.url))) {
@@ -10774,7 +11089,16 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           }
           continue;
         }
-        list.push({ element: baseElement, kind: capturedKind === 'audio' ? 'audio' : 'video', url: captured, srcKind: capturedKind === 'audio' ? 'audio' : 'direct', duration: 0, title: document.title || '', visible: true });
+        list.push({
+          element: douyinHost ? null : baseElement,
+          kind: capturedKind === 'audio' ? 'audio' : 'video',
+          url: captured,
+          srcKind: capturedKind === 'audio' ? 'audio' : 'direct',
+          duration: 0,
+          title: document.title || '',
+          visible: true,
+          unbound: douyinHost
+        });
       }
       try {
         const perfList = performance.getEntriesByType('resource')
@@ -10789,17 +11113,25 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
             if (perfKind === 'audio') { existing.kind = 'audio'; existing.srcKind = 'audio'; }
             continue;
           }
-          list.push({ element: baseElement, kind: perfKind === 'audio' ? 'audio' : 'video', url: perf, srcKind: perfKind === 'audio' ? 'audio' : 'direct', duration: 0, title: document.title || '', visible: true });
+          list.push({
+            element: douyinHost ? null : baseElement,
+            kind: perfKind === 'audio' ? 'audio' : 'video',
+            url: perf,
+            srcKind: perfKind === 'audio' ? 'audio' : 'direct',
+            duration: 0,
+            title: document.title || '',
+            visible: true,
+            unbound: douyinHost
+          });
         }
       } catch (e) { /* ignore */ }
     }
     // Audio candidates must win over video-only DASH streams.
-    if (/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
-      const baseElement = list.find(candidate => candidate.element)?.element || null;
+    if (douyinHost) {
       for (const captured of douyinCapturedUrls.filter(url => isSafeRemoteUrl(url) && !/\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.test(url)).slice(0, 12)) {
         if (list.some(candidate => candidate.url === captured)) continue;
         const isAudio = /(mime(?:[_-]?type)?=(?:audio|audio%2F)|audio\/|media-audio|\.mp3|\.m4a|\.aac|\.wav|\.ogg|opus)/i.test(captured);
-        list.push({ element: baseElement, kind: isAudio ? 'audio' : 'video', url: captured, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
+        list.push({ element: null, kind: isAudio ? 'audio' : 'video', url: captured, srcKind: 'direct', duration: 0, title: document.title || '', visible: true, unbound: true });
       }
     }
     list.sort((a, b) => (a.kind === 'audio' && b.kind !== 'audio' ? -1 : a.kind !== 'audio' && b.kind === 'audio' ? 1 : 0));
@@ -10868,8 +11200,38 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
   }
 
-  function douyinPageDataUrls() {
-    if (!/douyin\.com/i.test(location.hostname)) return [];
+  function douyinAwemeIdFromUrl(value) {
+    const raw = String(value || '');
+    try {
+      const parsed = new URL(raw, location.href || 'https://www.douyin.com/');
+      for (const key of ['aweme_id', 'item_id', 'group_id']) {
+        const id = String(parsed.searchParams.get(key) || '');
+        if (/^\d{10,}$/.test(id)) return id;
+      }
+      const fromPath = parsed.pathname.match(/\/(?:video|note)\/(\d{10,})/i);
+      if (fromPath) return fromPath[1];
+    } catch (e) { /* fall through to the cheap regex */ }
+    const match = raw.match(/(?:[?&#]|\/)(?:aweme_id|item_id|group_id)=?(\d{10,})/i);
+    return match ? match[1] : '';
+  }
+
+  function douyinUrlMatchesAweme(value, targetId) {
+    const target = String(targetId || '');
+    if (!/^\d{10,}$/.test(target)) return false;
+    return douyinAwemeIdFromUrl(value) === target;
+  }
+
+  function douyinDurationSeconds(value) {
+    const duration = Number(value) || 0;
+    return duration > 1000 ? duration / 1000 : duration;
+  }
+
+  function douyinPageDataUrls(targetIdOverride) {
+    if (!/douyin\.com/i.test(location.hostname)) return { urls: [], audioUrls: [] };
+    const targetId = String(targetIdOverride || currentDouyinAwemeId() || '');
+    // Page snapshots contain every preloaded recommendation.  Without a target
+    // id there is no safe way to attribute a play_addr to the current player.
+    if (!/^\d{10,}$/.test(targetId)) return { urls: [], audioUrls: [] };
     const roots = [];
     const add = value => { if (value) roots.push(value); };
     try { add(window._ROUTER_DATA); } catch (e) { /* ignore */ }
@@ -10893,23 +11255,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (router) add(parseJsonSafe(router[1]));
       const initial = text.match(/(?:window\.)?__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});?/);
       if (initial) add(parseJsonSafe(initial[1]));
-      const play = text.match(/"play_addr"\s*:\s*(\{[\s\S]{0,3000}?\})\s*[,}]/);
-      if (play) add(parseJsonSafe('{"play_addr":' + play[1] + '}'));
     }
     const urls = [];
     const audioUrls = [];
-    for (const script of Array.from(document.scripts || [])) {
-      const text = String(script.textContent || '');
-      if (!text || text.length > 2 * 1024 * 1024) continue;
-      const re = /https?:[^\s"'<>]+/g;
-      let match;
-      let count = 0;
-      while ((match = re.exec(text)) && count++ < 40) {
-        const url = match[0].replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/gi, '&');
-        if (isPlatformMediaUrl(url) && urls.indexOf(url) < 0) urls.push(url);
-      }
-    }
-    const targetId = currentDouyinAwemeId();
     for (const root of roots) {
       collectDouyinUrls(root, urls, 0, '', targetId);
       collectDouyinAudioUrls(root, audioUrls, 0, '', targetId);
@@ -10917,29 +11265,85 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return { urls, audioUrls };
   }
 
-  function resolveDouyinAudioUrl() {
+  function douyinUrlParam(value, name) {
+    try { return new URL(String(value || ''), location.href).searchParams.get(name) || ''; } catch (e) { return ''; }
+  }
+  function douyinAudioTracksForVideo(video) {
+    const current = String(video && (video.currentSrc || video.src) || '');
+    // When the player exposes a direct URL, its audio-only companion shares
+    // the same request-log token (`l`).  If the player only exposes blob:, the
+    // latest audio requests are still candidates; callers must verify their
+    // decoded duration against the clicked player before using them.
+    const logId = /^https?:\/\//i.test(current) ? douyinUrlParam(current, 'l') : '';
+    const isAudio = url => isSafeRemoteUrl(url)
+      && !/\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.test(String(url || ''))
+      && (/media-audio/i.test(url)
+        || /mime(?:[_-]?type)?=(?:audio|audio%2F)/i.test(url)
+        || /audio\/tos/i.test(url)
+        || /\.(?:m4a|mp3|aac)(?:$|[?&#])/i.test(url));
+    const urls = [];
+    try {
+      window.performance.getEntriesByType('resource')
+        .slice().sort((a, b) => (Number(b.startTime) || 0) - (Number(a.startTime) || 0))
+        .forEach(entry => urls.push(String(entry.name || '')));
+    } catch (e) { /* ignore */ }
+    for (const captured of douyinCapturedUrls) urls.push(captured);
+    const seen = Object.create(null);
+    const out = [];
+    const matched = [];
+    for (const url of urls) {
+      if (!url || seen[url]) continue;
+      seen[url] = 1;
+      if (!isAudio(url)) continue;
+      if (logId && douyinUrlParam(url, 'l') === logId) matched.push(url);
+      out.push(url);
+      if (out.length >= 8) break;
+    }
+    if (matched.length) return matched;
+    // A signed direct URL is not always accompanied by a visible audio
+    // resource entry.  Keep the recent candidates as duration-checked
+    // fallbacks instead of losing the only usable audio path.
+    return out.slice(0, 4);
+  }
+  function douyinAudioTrackForVideo(video) {
+    return douyinAudioTracksForVideo(video)[0] || '';
+  }
+  function resolveDouyinAudioUrl(anchorVideo) {
     if (!/douyin\.com/i.test(location.hostname)) return '';
-    const captured = douyinCapturedUrls.find(url => isSafeRemoteUrl(url) && !/\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.test(String(url || '')) && /(mime(?:[_-]?type)?=(?:audio|audio%2F)|audio\/|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg|opus)/i.test(String(url || '')));
+    const targetId = currentDouyinAwemeId(anchorVideo);
+    if (!targetId) return '';
+    const isAudio = url => isSafeRemoteUrl(url)
+      && !/\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.test(String(url || ''))
+      && /(mime(?:[_-]?type)?=(?:audio|audio%2F)|audio\/|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg|opus)/i.test(String(url || ''));
+    // A visible network URL only belongs to this clip when the URL names the
+    // same aweme id.  Most signed CDN URLs do not, so they are deliberately
+    // ignored rather than guessed from request recency.
+    const captured = douyinCapturedUrls.find(url => isAudio(url) && douyinUrlMatchesAweme(url, targetId));
     if (captured) return captured;
-    const page = douyinPageDataUrls();
-    return page.audioUrls.find(url => !/\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.test(url)) || '';
+    const page = douyinPageDataUrls(targetId);
+    return page.audioUrls.find(url => isAudio(url)) || '';
   }
 
-  function resolveDouyinMediaUrl() {
+  function resolveDouyinMediaUrl(anchorVideo) {
     if (!/douyin\.com/i.test(location.hostname)) return '';
+    const targetId = currentDouyinAwemeId(anchorVideo);
+    if (!targetId) return '';
     const isImage = url => /\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.test(String(url || ''));
     const isM4s = url => /\.m4s(?:$|\?)/i.test(String(url || ''));
     const fromList = list => {
       const clean = list.filter(url => isSafeRemoteUrl(url) && !isImage(url) && mediaUrlKind(url, 'video') !== 'audio');
       return clean.find(url => !isM4s(url)) || clean[0] || '';
     };
-    const captured = fromList(douyinCapturedUrls);
+    const captured = fromList(douyinCapturedUrls.filter(url => douyinUrlMatchesAweme(url, targetId)));
     if (captured) return captured;
-    const pageData = douyinPageDataUrls();
+    const pageData = douyinPageDataUrls(targetId);
     const fromPage = fromList(pageData.urls || []);
     if (fromPage) return fromPage;
-    for (const video of Array.from(document.querySelectorAll('video'))) {
-      const holder = video.closest && video.closest('[data-e2e="feed-video"],[data-aweme-id],[data-video-id],[data-e2e="video-player"]');
+    const candidates = anchorVideo && anchorVideo.isConnected
+      ? [anchorVideo]
+      : Array.from(document.querySelectorAll('video')).filter(video => awemeIdFromVideo(video) === targetId);
+    for (const video of candidates) {
+      const holder = video.closest && video.closest('[data-e2e="feed-active-video"],[data-e2e="feed-video"],[data-aweme-id],[data-video-id],[data-e2e-vid],[data-e2e="video-player"]');
       const attrs = [
         video.currentSrc, video.src,
         video.getAttribute('data-src'), video.getAttribute('data-url'),
@@ -10955,7 +11359,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       const perf = performance.getEntriesByType('resource')
         .slice().sort((a, b) => (Number(b.startTime) || 0) - (Number(a.startTime) || 0))
         .map(entry => String(entry.name || ''))
-        .filter(name => !isImage(name) && (/\.(mp4|m4s|flv|mp3|m4a)(?:$|\?)/i.test(name) || /douyinvod|video\/tos|mime_type=video|mime_type=audio/i.test(name)));
+        .filter(name => !isImage(name) && douyinUrlMatchesAweme(name, targetId));
       return fromList(perf);
     } catch (e) { /* ignore */ }
     return '';
@@ -11099,7 +11503,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
-      const timer = setTimeout(() => finish({ ok: false, reason: 'timeout', detail: '远程转写超过 300 秒没有返回' }), 300000);
+      const timer = setTimeout(() => finish({ ok: false, reason: 'timeout', detail: '远程转写超过 900 秒没有返回' }), 900000);
       if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { finish(null); return; }
       const endpoint = aiConfig.mediaEndpoint || '';
       const key = aiConfig.mediaApiKey || (aiConfig.apiKeys && aiConfig.apiKeys.siliconflow) || '';
@@ -11160,6 +11564,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       const match = String(raw || '').match(/[?&](?:aweme_id|item_id|video_id)=(\d{10,})/i);
       if (match) return match[1];
     }
+    // Prefer explicit DOM ownership attributes on every ancestor before
+    // looking at React props.  A parent component can carry props for a list
+    // of preloaded clips, and the first item in that list is not necessarily
+    // the player the user clicked.
     let node = video;
     for (let depth = 0; node && depth < 9; depth++, node = node.parentElement) {
       for (const attr of ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id', 'data-itemid', 'data-vid', 'data-e2e-vid', 'data-id']) {
@@ -11168,8 +11576,16 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       }
       try {
         for (const attr of Array.from(node.attributes || [])) {
-          if (/(aweme|video|item|vid|id)/i.test(attr.name) && /^\d{10,}$/.test(String(attr.value))) return String(attr.value);
+          if (/(aweme|video|item|vid)/i.test(attr.name) && /^\d{10,}$/.test(String(attr.value))) return String(attr.value);
         }
+      } catch (e) { /* ignore */ }
+      try {
+        // Douyin's detail player wrapper is `.video_<aweme_id>` without any
+        // data-aweme-id attribute.  Parse that exact class before falling back
+        // to the address bar, which can be stale in the recommendation feed.
+        const className = String(node.className && node.className.baseVal !== undefined ? node.className.baseVal : (node.className || ''));
+        const classMatch = className.match(/(?:^|[\s_-])video[_-]?(\d{10,})(?=$|[\s_-])/i);
+        if (classMatch) return classMatch[1];
       } catch (e) { /* ignore */ }
       try {
         const outer = String(node.outerHTML || '');
@@ -11177,10 +11593,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         const match = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);
         if (match) return match[1];
       } catch (e) { /* ignore */ }
-      if (depth < 3) {
-        const reactId = reactAwemeIdFromNode(node);
-        if (reactId) return reactId;
-      }
+    }
+    node = video;
+    for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+      const reactId = reactAwemeIdFromNode(node);
+      if (reactId) return reactId;
     }
     return '';
   }
@@ -11193,8 +11610,17 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (fromAnchor) return fromAnchor;
     // When an anchor player was supplied, do not fall back to the URL: the
     // recommendation feed often leaves the previous clip's /video/{id} in the
-    // address bar.  Let the MAIN-world hook resolve the current node instead.
-    if (anchorVideo) return '';
+    // address bar.  The one safe exception is a real `/video/{id}` detail page
+    // whose player has no id attributes at all (current Douyin builds put the
+    // id only in the wrapper class, which `awemeIdFromVideo` now reads too).
+    if (anchorVideo) {
+      try {
+        const detailMatch = location.pathname.match(/\/video\/(\d+)/);
+        const detailPlayer = anchorVideo.closest && anchorVideo.closest('.video-detail-container,[data-e2e="video-detail"]');
+        if (detailMatch && detailPlayer) return detailMatch[1];
+      } catch (e) { /* ignore */ }
+      return '';
+    }
     try {
       const canonical = document.querySelector('link[rel="canonical"],meta[property="og:url"]');
       const canonicalUrl = canonical && (canonical.href || canonical.content || '');
@@ -11216,6 +11642,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function requestDouyinDetail(preferredAwemeId, anchorVideo) {
     return new Promise(resolve => {
       if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname)) { resolve(null); return; }
+      const cacheKey = (preferredAwemeId ? String(preferredAwemeId) : '')
+        + '|' + location.pathname
+        + '|' + String(anchorVideo && (anchorVideo.currentSrc || anchorVideo.src) || '');
+      const cached = douyinDetailCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < 120000) { resolve(cached.value); return; }
       let settled = false;
       const id = 'dy-detail-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       let markedAnchor = false;
@@ -11227,6 +11658,13 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         } catch (e) { /* ignore */ }
         window.removeEventListener('message', onMessage);
         clearTimeout(timer);
+        if (value && value.awemeId) {
+          douyinDetailCache.set(cacheKey, { at: Date.now(), value });
+          if (douyinDetailCache.size > 12) {
+            const oldest = [...douyinDetailCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, douyinDetailCache.size - 12);
+            for (const [key] of oldest) douyinDetailCache.delete(key);
+          }
+        }
         resolve(value || null);
       };
       const onMessage = event => {
@@ -11249,36 +11687,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     return new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
-      const timer = setTimeout(() => finish(null), 12000);
-      if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { finish(null); return; }
+      const timer = setTimeout(() => finish({ ok: false, reason: 'timeout', detail: '抖音解析超过 35 秒没有返回' }), 35000);
+      if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { finish({ ok: false, reason: 'no-runtime' }); return; }
       try {
         EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:resolveDouyin', url }, response => {
           try { void EXT.runtime.lastError; } catch (e) { /* ignore */ }
-          finish(response && response.ok ? response : null);
+          finish(response || { ok: false, reason: 'no-response' });
         });
-      } catch (e) { finish(null); }
-    });
-  }
-
-  function requestCapturedDouyinMedia() {
-    return new Promise(resolve => {
-      if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { resolve(); return; }
-      let settled = false;
-      const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); };
-      const timer = setTimeout(finish, 900);
-      try {
-        EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:getCapturedMedia' }, response => {
-          try { void EXT.runtime.lastError; } catch (e) { /* ignore */ }
-          const urls = response && Array.isArray(response.urls) ? response.urls : [];
-          for (const item of urls) {
-            const url = String(item && item.url || item || '');
-            if (!isSafeRemoteUrl(url)) continue;
-            if (!douyinCapturedUrls.includes(url)) douyinCapturedUrls.unshift(url);
-          }
-          if (douyinCapturedUrls.length > 40) douyinCapturedUrls.length = 40;
-          finish();
-        });
-      } catch (e) { finish(); }
+      } catch (e) { finish({ ok: false, reason: 'network', detail: String(e && e.message || e) }); }
     });
   }
 
@@ -11373,6 +11789,58 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
   }
 
+  async function captureAudioFromMediaUrl(url, duration) {
+    if (!url || !/^https?:\/\//i.test(url)) return null;
+    let host = null;
+    let audio = null;
+    try {
+      host = document.createElement('div');
+      host.setAttribute('aria-hidden', 'true');
+      host.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;';
+      audio = document.createElement('audio');
+      audio.src = url;
+      audio.preload = 'auto';
+      audio.muted = true;
+      audio.volume = 0;
+      audio.setAttribute('aria-hidden', 'true');
+      host.appendChild(audio);
+      document.documentElement.appendChild(host);
+      const ready = await new Promise(resolve => {
+        let done = false;
+        const finish = value => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          audio.removeEventListener('loadedmetadata', onReady);
+          audio.removeEventListener('canplay', onReady);
+          audio.removeEventListener('error', onError);
+          resolve(value);
+        };
+        const onReady = () => finish(true);
+        const onError = () => finish(false);
+        const timer = setTimeout(() => finish(false), 10000);
+        audio.addEventListener('loadedmetadata', onReady, { once: true });
+        audio.addEventListener('canplay', onReady, { once: true });
+        audio.addEventListener('error', onError, { once: true });
+      });
+      if (!ready) return null;
+      // Decoding a complete muxed MP4 through decodeAudioData is rejected by
+      // some Chromium builds.  A hidden media element still decodes its AAC
+      // track, so capture that track at 4x with Web Audio (never audible and
+      // never sent to the model as video).
+      return await captureMediaElementAudio(audio, null, {
+        background: true,
+        captureRate: 4,
+        duration: Number(duration) || Number(audio.duration) || 0
+      });
+    } catch (e) {
+      return null;
+    } finally {
+      try { if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); } } catch (e) { /* ignore */ }
+      try { if (host && host.parentNode) host.remove(); } catch (e) { /* ignore */ }
+    }
+  }
+
   async function extractAudioFromVideo(candidate) {
     if (!candidate || candidate.kind !== 'video' || !candidate.url) return null;
     if (candidate.srcKind === 'dash' || candidate.srcKind === 'stream') return null;
@@ -11383,30 +11851,35 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         arrayBuffer = await response.arrayBuffer();
       } else {
         const data = await requestMediaBytes(candidate.url);
-        if (!data || !data.dataUrl) return null;
-        arrayBuffer = dataUrlToArrayBuffer(data.dataUrl);
+        if (data && data.dataUrl) arrayBuffer = dataUrlToArrayBuffer(data.dataUrl);
       }
-    } catch (e) { return null; }
-    if (!arrayBuffer || arrayBuffer.byteLength > MEDIA_MAX_BYTES) return null;
-    const AudioCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtor) return null;
-    const context = new AudioCtor();
-    try {
-      const audioBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
-      const channel = audioBuffer.getChannelData(0);
-      let peak = 0;
-      for (let i = 0; i < channel.length; i += 16) peak = Math.max(peak, Math.abs(channel[i]));
-      if (peak < 0.0005) return null;
-      const chunks = await audioBufferToWavChunks(audioBuffer);
-      if (!chunks.length) return null;
-      const fullBlob = audioBufferToWav(audioBuffer, 16000, 1, 0,
-        Math.ceil(audioBuffer.length * 16000 / audioBuffer.sampleRate));
-      return { dataUrl: chunks[0], chunks, fullBlob, mime: 'audio/wav', duration: audioBuffer.duration };
-    } catch (e) {
-      return null;
-    } finally {
-      try { context.close(); } catch (e) { /* ignore */ }
+    } catch (e) { /* fall through to media-element capture */ }
+    if (arrayBuffer && arrayBuffer.byteLength <= MEDIA_MAX_BYTES) {
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtor) {
+        const context = new AudioCtor();
+        try {
+          const audioBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+          const channel = audioBuffer.getChannelData(0);
+          let peak = 0;
+          for (let i = 0; i < channel.length; i += 16) peak = Math.max(peak, Math.abs(channel[i]));
+          if (peak < 0.0005) return null;
+          const chunks = await audioBufferToWavChunks(audioBuffer);
+          if (!chunks.length) return null;
+          const fullBlob = audioBufferToWav(audioBuffer, 16000, 1, 0,
+            Math.ceil(audioBuffer.length * 16000 / audioBuffer.sampleRate));
+          return { dataUrl: chunks[0], chunks, fullBlob, mime: 'audio/wav', duration: audioBuffer.duration };
+        } catch (e) {
+          /* try the media-element path below */
+        } finally {
+          try { context.close(); } catch (e) { /* ignore */ }
+        }
+      }
     }
+    if (candidate.srcKind !== 'blob' && /^https?:\/\//i.test(candidate.url)) {
+      return await captureAudioFromMediaUrl(candidate.url, candidate.duration);
+    }
+    return null;
   }
 
   async function extractAudioFromUrl(candidate) {
@@ -11465,7 +11938,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const groups = new Map();
     for (const chunk of chunks) {
       if (!chunk || !(chunk.data instanceof ArrayBuffer) || !chunk.data.byteLength) continue;
-      const id = String(chunk.id || 0);
+      // Old hook builds used the MediaSource owner as `id`, so audio and video
+      // appends landed in one bucket and decodeAudioData received a muxed,
+      // unordered stream.  Include mime as a defensive second key.
+      const id = String(chunk.id || 0) + '|' + String(chunk.mime || '');
       if (!groups.has(id)) groups.set(id, []);
       groups.get(id).push(chunk);
     }
@@ -11985,7 +12461,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
 
   function syncSummaryBackdrop() {
-    if (!shell || !shell.backdrop) return;
+    if (!shell || !shell.backdrop || !windows.length) return;
     guardSummaryBackdrop();
     // Do NOT hide a summary merely because its panel is momentarily hidden
     // while renderTextAISummaryPanel() is still building.  That race left the
@@ -12440,15 +12916,36 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       return;
     }
     if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { toast(item, '扩展后台不可用'); return; }
-    EXT.runtime.sendMessage({
-      namespace: 'LPS_EXT',
-      type: 'ldp:downloadMedia',
-      url,
-      filename
-    }, response => {
-      try { void EXT.runtime.lastError; } catch (e) { /* ignore */ }
-      if (!response || !response.ok) toast(item, '下载启动失败：' + String(response && (response.detail || response.reason) || '未知原因'));
-    });
+    const fallback = () => {
+      EXT.runtime.sendMessage({
+        namespace: 'LPS_EXT',
+        type: 'ldp:downloadMedia',
+        url,
+        filename
+      }, response => {
+        try { void EXT.runtime.lastError; } catch (e) { /* ignore */ }
+        if (!response || !response.ok) toast(item, '下载启动失败：' + String(response && (response.detail || response.reason) || '未知原因'));
+      });
+    };
+    // Fetch in the page first.  Douyin's CDN requires a first-party Referer;
+    // fetching here preserves the page referrer and lets <a download> save the
+    // file without the downloads API's Save-As cancellation path.  If CORS or
+    // a site policy blocks it, fall back to the background downloader.
+    if (typeof fetch === 'function') {
+      toast(item, '正在下载媒体…');
+      fetch(url, { credentials: 'same-origin' }).then(response => {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.blob();
+      }).then(blob => {
+        if (!blob || !blob.size) throw new Error('媒体为空');
+        if (downloadBlob(blob, filename)) toast(item, '下载已开始');
+      }).catch(() => {
+        toast(item, '页面下载受限，正在交给后台下载…');
+        fallback();
+      });
+      return;
+    }
+    fallback();
   }
 
   function downloadBlob(blob, filename) {
@@ -12479,6 +12976,70 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       toast(item, '音频已开始下载');
     } else {
       toast(item, '音频提取失败：没有可下载的独立音轨');
+    }
+  }
+
+  async function ensureMediaForDownload(item) {
+    if (!item || item.closed) return null;
+    const anchorVideo = item.anchorVideo && item.anchorVideo.isConnected
+      ? item.anchorVideo
+      : (typeof findActiveVideoElement === 'function' ? findActiveVideoElement() : null);
+    let state = item.mediaState;
+    if (!state) {
+      state = item.mediaState = {
+        busy: false, cancelled: false, answer: '', transcript: '', transcriptCues: [], transcriptDuration: 0,
+        error: '', subtitleError: '', textMode: false, list: [], anchorVideo: anchorVideo || null,
+        candidate: null, prompt: ''
+      };
+    }
+    if (anchorVideo) {
+      state.anchorVideo = anchorVideo;
+      if (!item.anchorVideo) item.anchorVideo = anchorVideo;
+    }
+    if (!Array.isArray(state.list)) state.list = [];
+    if (!state.list.length && typeof scanMediaCandidates === 'function') state.list = scanMediaCandidates();
+    // Subtitle summaries never needed the media list before.  Resolve the
+    // detail once on first download so the MP4 and its audio-only track are
+    // both available even when the summary came from captions.
+    if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname) || !anchorVideo) return state;
+    if (!state.downloadDetailPromise) {
+      const requestedId = currentDouyinAwemeId(anchorVideo);
+      state.downloadRequestedId = requestedId;
+      state.downloadDetailPromise = requestDouyinDetail(requestedId, anchorVideo);
+    }
+    let detail = null;
+    try { detail = await state.downloadDetailPromise; } catch (e) { detail = null; }
+    if (!detail || item.closed) return state;
+    const currentId = state.downloadRequestedId || currentDouyinAwemeId(anchorVideo);
+    const mediaDuration = Number(anchorVideo.duration) || 0;
+    const detailId = douyinDetailBoundId(detail, currentId, mediaDuration);
+    if (!detailId) return state;
+    state.boundAwemeId = detailId;
+    state.boundTitle = detail.title || state.boundTitle || '';
+    appendDouyinDetailCandidates(state.list, detail, detailId, mediaDuration, state.boundTitle);
+    if (!state.candidate || !state.candidate.url) state.candidate = state.list[0] || null;
+    return state;
+  }
+
+  async function downloadVideoFromSummary(item) {
+    if (!item || item.closed) return;
+    toast(item, '正在解析视频下载地址…');
+    try {
+      await ensureMediaForDownload(item);
+      await downloadMediaVideo(item);
+    } catch (e) {
+      toast(item, '视频下载失败：' + String(e && e.message || e || '未知错误'));
+    }
+  }
+
+  async function downloadAudioFromSummary(item) {
+    if (!item || item.closed) return;
+    toast(item, '正在解析音频下载地址…');
+    try {
+      await ensureMediaForDownload(item);
+      await downloadMediaAudio(item);
+    } catch (e) {
+      toast(item, '音频下载失败：' + String(e && e.message || e || '未知错误'));
     }
   }
 
@@ -12585,10 +13146,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (!state) return;
     const candidates = (state.list || []).filter(candidate => candidate.kind === 'video')
       .sort((a, b) => {
+        const direct = candidate => candidate.url && !/^blob:/i.test(candidate.url) ? 1 : 0;
         if (/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
-          return videoActivityScore(b.element) - videoActivityScore(a.element);
+          return direct(b) - direct(a) || videoActivityScore(b.element) - videoActivityScore(a.element);
         }
-        return (a.url && !/^blob:/i.test(a.url) ? 0 : 1) - (b.url && !/^blob:/i.test(b.url) ? 0 : 1);
+        return direct(b) - direct(a);
       });
     if (state.candidate && state.candidate.kind === 'video' && !candidates.includes(state.candidate)) candidates.push(state.candidate);
     if (!candidates.length) { toast(item, '当前没有可下载的视频文件'); return; }
@@ -12620,7 +13182,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         }
         continue;
       }
-      if (await probeVideoCandidate(candidate)) {
+      if (candidate.verifiedVideo || await probeVideoCandidate(candidate)) {
         requestMediaDownload(item, candidate, 'video');
         return;
       }
@@ -12631,7 +13193,12 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function cleanDownloadName(item, candidate, kindOverride) {
     const raw = cleanBaseDownloadName(item);
     const kind = kindOverride || (candidate && candidate.kind === 'audio' ? 'audio' : 'video');
-    const ext = kind === 'audio' ? 'm4a' : 'mp4';
+    let ext = kind === 'audio' ? 'm4a' : 'mp4';
+    try {
+      const path = new URL(String(candidate && candidate.url || ''), location.href).pathname;
+      const match = path.match(/\.(webm|mov|mkv|m4a|mp3|aac|ogg|wav|mp4)$/i);
+      if (match) ext = match[1].toLowerCase();
+    } catch (e) { /* keep MIME default */ }
     return raw + '.' + ext;
   }
   function cleanBaseDownloadName(item) {
@@ -12850,20 +13417,26 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
   }
 
+  function mediaSourceNote(state) {
+    const value = state || {};
+    const sourceText = value.candidate
+      ? (value.candidate.kind === 'audio' ? '音频链路' : '视频链路') + ' · ' + (value.candidate.srcKind || '直链') + (value.candidate.duration ? ' · ' + Math.round(value.candidate.duration) + ' 秒' : '')
+      : '正在扫描页面媒体…';
+    const noteHtml = value.textMode
+      ? '当前页面没有可提取的音视频，已降级为网页正文总结。'
+      : '优先提取音频；没有独立音轨时使用视频链路。媒体只发送到你配置的硅基流动接口。';
+    const subtitleNote = value.subtitleError ? '\n字幕不可用：' + value.subtitleError : '';
+    return noteHtml + subtitleNote + (value.candidate ? '\n来源：' + sourceText : '');
+  }
+
   function renderMediaSummaryPanel(item) {
     item.panelMode = 'media';
     const body = panelFrame(item, '音视频内容总结', 'close');
     configureSummaryWindow(item);
     item.ui.panel.classList.add('media-panel');
     const state = item.mediaState || {};
-    const sourceText = state.candidate
-      ? (state.candidate.kind === 'audio' ? '音频链路' : '视频链路') + ' · ' + (state.candidate.srcKind || '直链') + (state.candidate.duration ? ' · ' + Math.round(state.candidate.duration) + ' 秒' : '')
-      : '正在扫描页面媒体…';
-    const noteHtml = state.textMode
-      ? '当前页面没有可提取的音视频，已降级为网页正文总结。'
-      : '优先提取音频；没有独立音轨时使用视频链路。媒体只发送到你配置的硅基流动接口。';
-    const subtitleNote = state.subtitleError ? '\n字幕不可用：' + state.subtitleError : '';
-    const source = el('p', 'note', noteHtml + subtitleNote + (state.candidate ? '\n来源：' + sourceText : ''));
+    const source = el('p', 'note', mediaSourceNote(state));
+    item.ui.mediaSource = source;
     const status = el('div', 'media-summary-status', state.error ? '未能提取媒体' : (state.busy ? '正在处理…' : '准备中…'));
     const progress = el('div', 'media-progress');
     const progressBar = el('span', 'media-progress-bar');
@@ -13016,6 +13589,73 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     hideSummaryWindow(item);
     showSummaryLoading(item, '正在准备媒体总结…');
     startMediaSummary(item);
+    return item;
+  }
+
+  function openDouyinLinkSummary(value, fallbackTitle, point) {
+    const source = httpUrl(value);
+    if (!source) return null;
+    const item = openWindow('', fallbackTitle || '抖音视频总结', null, point, { bare: true });
+    if (!item) return null;
+    item.summaryProtected = true;
+    item.mediaState = {
+      busy: true,
+      cancelled: false,
+      answer: '',
+      transcript: '',
+      transcriptCues: [],
+      transcriptDuration: 0,
+      error: '',
+      subtitleError: '',
+      textMode: false,
+      list: [],
+      anchorVideo: null,
+      candidate: null,
+      boundAwemeId: '',
+      prompt: ''
+    };
+    showSummaryLoading(item, '正在解析抖音视频…');
+    requestDouyinResolve(source).then(resolved => {
+      if (!item || item.closed || !item.mediaState) return;
+      const state = item.mediaState;
+      if (state.cancelled) return;
+      const audio = resolved && Array.isArray(resolved.audio) ? resolved.audio.find(url => /^https?:\/\//i.test(String(url || ''))) : '';
+      const video = resolved && Array.isArray(resolved.video) ? resolved.video.find(url => /^https?:\/\//i.test(String(url || ''))) : '';
+      if (!resolved || !resolved.ok || (!audio && !video)) {
+        state.busy = false;
+        state.error = '抖音视频解析失败：' + String((resolved && (resolved.detail || resolved.reason)) || '没有返回可用媒体地址');
+        openPanel(item, 'media');
+        hideSummaryLoading(item);
+        if (typeof revealSummaryWindow === 'function') revealSummaryWindow(item);
+        return;
+      }
+      const duration = Number(resolved.duration) || 0;
+      const title = resolved.title || fallbackTitle || '抖音视频';
+      const awemeId = String(resolved.videoId || '');
+      const entries = [];
+      if (audio) entries.push({ element: null, kind: 'audio', url: audio, srcKind: 'direct', duration, title, visible: false, boundAwemeId: awemeId });
+      if (video) entries.push({ element: null, kind: 'video', url: video, srcKind: 'direct', duration, title, visible: false, boundAwemeId: awemeId, verifiedVideo: true });
+      state.list = entries;
+      state.candidate = entries[0] || null;
+      state.busy = false;
+      state.textMode = false;
+      state.boundAwemeId = String(resolved.videoId || '');
+      if (resolved.title) {
+        item.title = String(resolved.title).slice(0, 180);
+        item.fallbackTitle = item.title;
+        if (typeof renderTitle === 'function') renderTitle(item);
+      }
+      openPanel(item, 'media');
+      if (typeof hideSummaryWindow === 'function') hideSummaryWindow(item);
+      startMediaSummary(item);
+    }).catch(error => {
+      if (!item || item.closed || !item.mediaState || item.mediaState.cancelled) return;
+      item.mediaState.busy = false;
+      item.mediaState.error = '抖音视频解析失败：' + String(error && error.message || error || '网络错误');
+      openPanel(item, 'media');
+      hideSummaryLoading(item);
+      if (typeof revealSummaryWindow === 'function') revealSummaryWindow(item);
+    });
     return item;
   }
 
@@ -13179,7 +13819,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           state.busy = false;
           if (out) { out.classList.remove('streaming'); out.classList.add('markdown'); out.innerHTML = markdownToHtml(state.answer); hideStreamDots(item); out.dataset.tone = 'good'; }
           if (status) { status.textContent = '已加载完成'; status.classList.remove('streaming'); }
-          if (meta) meta.textContent = '已加载完成 · 总结来源：音频（ASR） · 文本模型 ' + (response.model || '');
+          if (meta) meta.textContent = (state.boundTitle ? '当前视频：' + state.boundTitle + ' · ' : '') + '已加载完成 · 总结来源：音频（ASR） · 文本模型 ' + (response.model || '');
           if (typeof markSummaryStep === 'function') markSummaryStepLabel(item, 'media', 'AI 总结', 'done');
           revealSummaryWindow(item);
         });
@@ -13263,7 +13903,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         if (status) { status.textContent = '已加载完成'; status.classList.remove('streaming'); }
         if (item.ui && item.ui.mediaProgress) item.ui.mediaProgress.style.width = '100%';
         if (item.ui && item.ui.mediaPercent) item.ui.mediaPercent.textContent = '100%';
-        if (meta) meta.textContent = '已加载完成 · 总结来源：音频（ASR） · 文本模型 ' + (msg.model || '') + ' · 总耗时 ' + Math.max(0.1, (Date.now() - (state.startedAt || started)) / 1000).toFixed(1) + ' 秒';
+        if (meta) meta.textContent = (state.boundTitle ? '当前视频：' + state.boundTitle + ' · ' : '') + '已加载完成 · 总结来源：音频（ASR） · 文本模型 ' + (msg.model || '') + ' · 总耗时 ' + Math.max(0.1, (Date.now() - (state.startedAt || started)) / 1000).toFixed(1) + ' 秒';
         if (typeof markSummaryStep === 'function') markSummaryStepLabel(item, 'media', 'AI 总结', 'done');
         if (typeof updateSummaryLoading === 'function') updateSummaryLoading(item, 100, '总结完成');
         setTimeout(() => revealSummaryWindow(item), 120);
@@ -13302,32 +13942,65 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
   function findActiveVideoElement() {
     const videos = Array.from(document.querySelectorAll('video'))
-      .filter(video => video && video.isConnected && (video.currentSrc || video.src || video.srcObject || video.readyState > 0));
+      .filter(video => video && video.isConnected && isVideoSummaryEligible(video)
+        && (video.currentSrc || video.src || video.srcObject || video.readyState > 0));
     return videos.sort((a, b) => videoActivityScore(b) - videoActivityScore(a))[0] || null;
   }
   function findCaptureVideoElement() {
     return findActiveVideoElement();
   }
 
+  function addMediaCandidateOnce(list, entry) {
+    if (!Array.isArray(list) || !entry || !entry.url) return;
+    const exists = list.some(item => item && item.url === entry.url && item.kind === entry.kind);
+    if (!exists) list.unshift(entry);
+  }
+
+  function douyinDetailBoundId(detail, currentId, mediaDuration) {
+    const detailId = String(detail && detail.awemeId || '');
+    const detailDuration = Number(detail && detail.duration) || 0;
+    const durationMatches = !mediaDuration || !detailDuration
+      || Math.abs(douyinDurationSeconds(detailDuration) - mediaDuration) < 3;
+    if (!detailId || !durationMatches) return '';
+    if (currentId) return detailId === String(currentId) ? detailId : '';
+    let pageVideoId = '';
+    try { pageVideoId = (location.pathname.match(/\/video\/(\d+)/) || [])[1] || ''; } catch (e) { /* ignore */ }
+    return pageVideoId && detailId === pageVideoId ? detailId : '';
+  }
+
+  function appendDouyinDetailCandidates(list, detail, detailId, mediaDuration, title) {
+    if (!Array.isArray(list) || !detail || !detailId) return;
+    const duration = Number(detail.duration) ? douyinDurationSeconds(detail.duration) : (Number(mediaDuration) || 0);
+    const videoUrl = detail.video && detail.video[0];
+    const audioUrl = detail.audio && detail.audio[0];
+    if (audioUrl) addMediaCandidateOnce(list, {
+      element: null, kind: 'audio', url: audioUrl, srcKind: 'direct', duration,
+      title: String(title || document.title || ''), visible: false, boundAwemeId: detailId
+    });
+    if (videoUrl) addMediaCandidateOnce(list, {
+      element: null, kind: 'video', url: videoUrl, srcKind: 'direct', duration,
+      title: String(title || document.title || ''), visible: false, boundAwemeId: detailId,
+      verifiedVideo: true
+    });
+  }
+
   function selectMediaCandidate(state) {
     const list = (state && state.list) || [];
     if (/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
-      // The recommendation feed can keep several preloaded <video> nodes.
-      // The exact node clicked by the user is authoritative; only then fall
-      // back to the highest-scoring active node.
-      const authoritative = list.find(candidate => candidate.authoritative && candidate.url && !/^blob:/i.test(candidate.url));
-      if (authoritative) return authoritative;
+      // The recommendation feed keeps several preloaded <video> nodes and the
+      // webRequest stream contains URLs for ads, effects and neighbouring
+      // clips.  A media URL is only usable when it is attached to the exact
+      // player the user opened the summary for.  Never fall through to a
+      // "latest" URL or another visible player: that summarized a different
+      // video while looking successful.
       const anchor = state && state.anchorVideo && state.anchorVideo.isConnected ? state.anchorVideo : null;
       if (anchor) {
-        const exact = list.find(candidate => candidate.element === anchor);
-        if (exact) return exact;
+        return list.find(candidate => !candidate.unbound && candidate.element === anchor) || null;
       }
       const activeVideo = list
-        .filter(candidate => candidate.kind === 'video' && candidate.element)
+        .filter(candidate => !candidate.unbound && candidate.kind === 'video' && candidate.element)
         .sort((a, b) => videoActivityScore(b.element) - videoActivityScore(a.element))[0];
-      if (activeVideo && videoActivityScore(activeVideo.element) > 0) return activeVideo;
-      const video = list.find(candidate => candidate.kind === 'video' && (candidate.element || candidate.url));
-      if (video) return video;
+      return activeVideo && videoActivityScore(activeVideo.element) > 0 ? activeVideo : null;
     }
     return list.find(candidate => candidate.url && !/^blob:/i.test(candidate.url)) || list[0] || null;
   }
@@ -13354,55 +14027,42 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       ? state.anchorVideo
       : (item.anchorVideo && item.anchorVideo.isConnected ? item.anchorVideo : null);
     if (anchorVideo) state.anchorVideo = anchorVideo;
+    const douyinHost = /douyin\.com|iesdouyin\.com/i.test(location.hostname);
+    const targetAwemeId = douyinHost ? currentDouyinAwemeId(anchorVideo) : '';
+    state.boundAwemeId = targetAwemeId;
     updateSummarySubtitleButton(item);
     if (typeof markSummaryStep === 'function') markSummaryStep(item, 'media', 0, 'active');
-    if (/douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
-      // webRequest captures signed CDN URLs even when the feed was refreshed
-      // in place and the old <video> node/data was replaced.
-      await requestCapturedDouyinMedia();
+    if (douyinHost) {
+      // Do not merge tab-wide webRequest URLs here.  That list also contains
+      // preloaded neighbours, live streams, ads and UI effect clips, and the
+      // old code could pick one as the "current" media.
       const fresh = scanMediaCandidates();
       if (fresh.length) { state.list = fresh; state.textMode = false; }
     }
     if (!state.list || !state.list.length) state.list = scanMediaCandidates();
-    const anchorCandidate = anchorVideo
-      ? state.list.find(candidate => candidate.element === anchorVideo)
-      : null;
-    const douyinNeedsResolve = /douyin\.com|iesdouyin\.com/i.test(location.hostname)
-      && (!anchorCandidate || !anchorCandidate.url
-        || /^blob:/i.test(anchorCandidate.url)
-        || anchorCandidate.srcKind === 'blob'
-        || anchorCandidate.srcKind === 'stream');
-    if (douyinNeedsResolve) {
-      updateSummaryLoading(item, 14, '正在解析当前抖音视频地址…');
-      // Prefer the detail API's complete MP4 first.  `music.play_url` is
-      // background music, and a single captured .m4s segment is not a complete
-      // audio source, so neither may outrank the API result.
-      const resolveId = currentDouyinAwemeId(anchorVideo);
-      const canResolveById = !!resolveId || /\/video\/\d+|(?:modal_id|aweme_id)=\d+/i.test(location.href);
-      const resolved = canResolveById
-        ? await requestDouyinResolve(resolveId ? 'https://www.douyin.com/video/' + resolveId : location.href)
-        : null;
-      const anchorDuration = Number(anchorVideo && anchorVideo.duration) || 0;
-      const resolvedDuration = Number(resolved && resolved.duration) || 0;
-      const resolvedMatches = !!resolved && !!resolved.url
-        && (!anchorDuration || !resolvedDuration || Math.abs(resolvedDuration - anchorDuration) < 3);
-      if (resolvedMatches) {
-        state.list.unshift({ element: anchorVideo || null, kind: /audio|music|\.mp3|\.m4a|\.aac|\.wav|\.ogg/i.test(resolved.url) ? 'audio' : 'video', url: resolved.url, srcKind: 'direct', duration: Number(resolved.duration) || 0, title: resolved.title || document.title || '', visible: true, authoritative: true });
-        state.textMode = false;
-      } else if (!anchorCandidate || !anchorCandidate.url) {
-        const douyinVideo = resolveDouyinMediaUrl();
-        if (douyinVideo) {
-          state.list.unshift({ element: anchorVideo || null, kind: 'video', url: douyinVideo, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
-          state.textMode = false;
-        } else {
-          const douyinAudio = resolveDouyinAudioUrl();
-          if (douyinAudio) {
-            state.list.unshift({ element: anchorVideo || null, kind: 'audio', url: douyinAudio, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
-            state.textMode = false;
-          }
-        }
-      }
+    // A direct Douyin player may expose the muxed MP4 as currentSrc while the
+    // browser still cannot decode its audio track.  The player's paired
+    // audio-only DASH request shares the same `l` request-log token; retain it
+    // as a bound fallback without letting it outrank the exact video anchor.
+    const pairedAudioUrls = douyinHost ? douyinAudioTracksForVideo(anchorVideo) : [];
+    for (const audioUrl of pairedAudioUrls) {
+      if (!audioUrl || (state.list || []).some(entry => entry && entry.url === audioUrl)) continue;
+      state.list.push({
+        element: null,
+        kind: 'audio',
+        url: audioUrl,
+        srcKind: 'direct',
+        duration: Number(anchorVideo && anchorVideo.duration) || 0,
+        title: document.title || '',
+        visible: false,
+        boundAwemeId: targetAwemeId
+      });
     }
+    // Douyin URL resolution is deliberately handled after candidate selection:
+    // the exact <video> node is already a valid, correctly-bound source even
+    // when every CDN resolver is unavailable.  Trying network resolvers here
+    // used to add 20+ seconds and let the recommendation feed advance before
+    // the summary had even started.
     if (/kuaishou\.com/i.test(location.hostname) && !state.list.some(candidate => candidate.url && !/^blob:/i.test(candidate.url))) {
       updateSummaryLoading(item, 14, '正在解析快手视频地址…');
       const resolved = await requestKuaishouResolve(location.href);
@@ -13459,38 +14119,63 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (item.ui && item.ui.mediaAudioDownload) item.ui.mediaAudioDownload.hidden = true;
     if (/douyin\.com/i.test(location.hostname) && (!candidate.url || candidate.srcKind === 'blob' || candidate.srcKind === 'stream')) {
       updateSummaryLoading(item, 16, '正在读取抖音详情并优先解析音频…');
-      const currentId = currentDouyinAwemeId(anchorVideo);
-      const detail = await requestDouyinDetail(currentId, anchorVideo);
+      const currentId = state.boundAwemeId || currentDouyinAwemeId(anchorVideo);
+      // Capture the exact player's SourceBuffer bytes now, before a 9–12 second
+      // detail request gives the recommendation feed time to replace the node.
+      // This snapshot is still the clicked clip even if playback advances.
+      const anchorBlob = String(anchorVideo && (anchorVideo.currentSrc || anchorVideo.src) || '');
+      state.mseChunksPromise = /^blob:/i.test(anchorBlob) ? requestDouyinMseChunks(anchorBlob) : null;
+      // Even when the DOM does not expose an id, a canonical /video/{id} page
+      // can still resolve it in the MAIN-world hook.  Skipping the request in
+      // that case was why some detail pages fell back to the MSE blob and never
+      // exposed the direct MP4 download URL.
+      let canonicalVideoPage = false;
+      try { canonicalVideoPage = /\/video\/\d+/.test(location.pathname); } catch (e) { /* ignore */ }
+      const detail = (currentId || canonicalVideoPage) ? await requestDouyinDetail(currentId, anchorVideo) : null;
       // A Douyin detail response's `music.play_url` is usually the background
-      // music, not the spoken audio.  Prefer the real video stream and extract
-      // its audio locally; only fall back to the music URL when no video URL
-      // exists at all.  Ignore a response for another aweme id.
+      // music, not the spoken audio.  Use the real video stream (or the exact
+      // player's MSE/audio request) and never substitute background music for
+      // a missing voice track.  The reply must name the same aweme requested.
       const mediaDuration = Number(candidate.duration) || Number(anchorVideo && anchorVideo.duration) || 0;
-      const detailDuration = Number(detail && detail.duration) || 0;
-      // The detail hook returns Douyin's millisecond field, while a fallback
-      // resolver may return seconds.  Normalize both before comparing.
-      const detailDurationSeconds = detailDuration > 1000 ? detailDuration / 1000 : detailDuration;
-      const durationMatches = !mediaDuration || !detailDuration || Math.abs(detailDurationSeconds - mediaDuration) < 3;
-      const detailMatches = (!currentId || !detail || !detail.awemeId || String(detail.awemeId) === String(currentId))
-        && durationMatches;
-      if (detail && detailMatches && detail.video && detail.video.length) {
-        candidate.url = detail.video[0];
-        candidate.srcKind = 'direct';
-        candidate.kind = 'video';
-      } else if (detail && detailMatches && detail.audio && detail.audio.length) {
+      const detailId = douyinDetailBoundId(detail, currentId, mediaDuration);
+      if (detail && detailId && detail.audio && detail.audio.length) {
+        // Prefer the audio-only DASH track returned by the detail API.  It is
+        // small, has no video bytes, and is bound to the same aweme id.
         candidate.url = detail.audio[0];
         candidate.srcKind = 'direct';
         candidate.kind = 'audio';
+        candidate.boundAwemeId = detailId;
+        state.boundAwemeId = detailId;
+        if (detail.title) state.boundTitle = String(detail.title).slice(0, 120);
+        // Keep the muxed video URL as a separate download candidate.  The
+        // summary itself stays audio-only, but "下载视频" must use the real
+        // MP4 rather than the MediaSource blob.
+        appendDouyinDetailCandidates(state.list, detail, detailId, mediaDuration, state.boundTitle);
+      } else if (detail && detailId && detail.video && detail.video.length) {
+        candidate.url = detail.video[0];
+        candidate.srcKind = 'direct';
+        candidate.kind = 'video';
+        candidate.boundAwemeId = detailId;
+        candidate.verifiedVideo = true;
+        state.boundAwemeId = detailId;
+        if (detail.title) state.boundTitle = String(detail.title).slice(0, 120);
+        appendDouyinDetailCandidates(state.list, detail, detailId, mediaDuration, state.boundTitle);
       } else {
-        const douyinVideo = resolveDouyinMediaUrl();
-        const douyinAudio = douyinVideo ? '' : resolveDouyinAudioUrl();
+        // Page data is still allowed, but only through the id-filtered path.
+        // If it cannot prove ownership we leave the blob candidate in place and
+        // let the exact player's MSE audio track be decoded below.
+        const douyinVideo = resolveDouyinMediaUrl(anchorVideo);
+        const douyinAudio = douyinVideo ? '' : resolveDouyinAudioUrl(anchorVideo);
         const douyinUrl = douyinVideo || douyinAudio;
         if (douyinUrl) {
           candidate.url = douyinUrl;
           candidate.srcKind = 'direct';
           candidate.kind = douyinAudio ? 'audio' : 'video';
+          candidate.boundAwemeId = currentId;
         }
       }
+      if (candidate.srcKind !== 'blob') state.mseChunksPromise = null;
+      if (item.ui && item.ui.mediaSource) item.ui.mediaSource.textContent = mediaSourceNote(state);
     }
     if (item.ui && item.ui.mediaDownload) {
       item.ui.mediaDownload.hidden = !((state.list || []).some(value => value.kind === 'video' && value.url) || candidate.kind === 'video');
@@ -13500,7 +14185,12 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     }
     updateSummaryLoading(item, 18, candidate.kind === 'audio' ? '已找到音频，正在准备…' : '已找到视频，正在准备本地音频…');
     if (status) status.textContent = candidate.kind === 'audio' ? '正在准备音频链路…' : '正在准备视频链路…';
-    if (meta) meta.textContent = candidate.duration ? '时长 ' + Math.round(candidate.duration) + ' 秒' : '';
+    if (meta) {
+      const identity = String(state.boundTitle || '').trim()
+        ? '当前视频：' + String(state.boundTitle).trim()
+        : (state.boundAwemeId ? '当前视频 ID：' + state.boundAwemeId : '');
+      meta.textContent = [identity, candidate.duration ? '时长 ' + Math.round(candidate.duration) + ' 秒' : ''].filter(Boolean).join(' · ');
+    }
     try {
       let payload = { kind: candidate.kind === 'audio' ? 'audio' : 'video', prompt: candidate.kind === 'audio' ? (aiConfig.mediaAudioPrompt || MEDIA_AUDIO_PROMPT) : (aiConfig.mediaVideoPrompt || MEDIA_VIDEO_PROMPT) };
       if (candidate.kind === 'audio' && candidate.srcKind !== 'blob' && candidate.srcKind !== 'stream') {
@@ -13523,7 +14213,38 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (candidate.kind === 'video') {
         if (status) status.textContent = candidate.srcKind === 'blob' ? '正在读取本地视频…' : (candidate.srcKind === 'hls' ? '正在下载 HLS 视频…' : '正在下载视频…');
         if (progress) progress.style.width = '28%';
-        let audio = await extractAudioFromVideo(candidate);
+        const boundAudioCandidates = (state.list || []).filter(entry => !entry.unbound
+          && entry.kind === 'audio'
+          && entry.url
+          && entry.srcKind !== 'blob'
+          && entry.srcKind !== 'stream'
+          && (!state.boundAwemeId || entry.boundAwemeId === state.boundAwemeId || entry.element === anchorVideo)).slice(0, 4);
+        const boundAudioCandidate = boundAudioCandidates[0] || null;
+        const expectedDuration = Number(candidate.duration) || Number(anchorVideo && anchorVideo.duration) || 0;
+        let audio = null;
+        let audioTranscript = '';
+        for (const audioEntry of boundAudioCandidates) {
+          if (audio || audioTranscript) break;
+          if (status) status.textContent = expectedDuration > 600 ? '正在远程分段转写当前视频音轨…' : '正在读取当前视频的独立音轨…';
+          updateSummaryLoading(item, 30, expectedDuration > 600 ? '正在远程分段转写当前视频音轨…' : '正在读取当前视频的独立音轨…');
+          // Long videos (20–40 min) cannot pass a multi-megabyte data URL
+          // through chrome.runtime.sendMessage.  Let the offscreen worker
+          // download the audio URL itself and return transcript segments.
+          const remote = await requestRemoteTranscript(audioEntry);
+          if (remote && remote.ok && remote.text) {
+            const remoteDuration = Number(remote.duration) || 0;
+            if (!expectedDuration || !remoteDuration || Math.abs(remoteDuration - expectedDuration) < 3) {
+              audioTranscript = remote.text;
+              if (meta) meta.textContent = '音频已分段转写 · ' + remote.chunks + ' 段 · ' + Math.round(remoteDuration || 0) + ' 秒';
+              updateSummaryLoading(item, 68, '音频转写完成，正在生成总结…');
+              break;
+            }
+          }
+          const attempt = await extractAudioFromUrl(audioEntry);
+          if (attempt && (!expectedDuration || !Number(attempt.duration)
+            || Math.abs(Number(attempt.duration) - expectedDuration) < 3)) audio = attempt;
+        }
+        if (!audio && !audioTranscript) audio = await extractAudioFromVideo(candidate);
         if (state.cancelled || item.closed) { state.busy = false; return; }
         if (!audio && /douyin\.com|iesdouyin\.com/i.test(location.hostname)) {
           // The player is MSE: its blob URL has no file behind it, but the
@@ -13531,7 +14252,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           // audio blob before trying to clone the player.
           if (status) status.textContent = '正在读取 MSE 音轨分片…';
           updateSummaryLoading(item, 34, '正在读取 MSE 音轨分片…');
-          const mseChunks = await requestDouyinMseChunks((candidate.element || anchorVideo) && (candidate.element || anchorVideo).currentSrc || '');
+          const mseChunks = state.mseChunksPromise
+            ? await state.mseChunksPromise
+            : await requestDouyinMseChunks((candidate.element || anchorVideo) && (candidate.element || anchorVideo).currentSrc || '');
+          state.mseChunksPromise = null;
           if (mseChunks.length) {
             if (status) status.textContent = '正在离线解码 MSE 音轨…';
             updateSummaryLoading(item, 38, '正在离线解码 MSE 音轨…');
@@ -13540,15 +14264,29 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           if (state.cancelled || item.closed) { state.busy = false; return; }
           // Douyin often exposes a separate audio-only DASH stream.  Prefer it
           // over recording the player when the video stream has no audio track.
-          const audioCandidate = (state.list || []).find(entry => entry.kind === 'audio'
-            && entry.url && entry.srcKind !== 'blob' && entry.srcKind !== 'stream');
-          if (!audio && audioCandidate) {
+          // The stream must still belong to this exact aweme.
+          const audioCandidate = boundAudioCandidate || (state.list || []).find(entry => !entry.unbound
+            && entry.kind === 'audio'
+            && entry.url
+            && entry.srcKind !== 'blob'
+            && entry.srcKind !== 'stream'
+            && (!state.boundAwemeId || entry.boundAwemeId === state.boundAwemeId || entry.element === anchorVideo));
+          if (!audio && audioCandidate && audioCandidate !== boundAudioCandidate) {
             if (status) status.textContent = '发现独立音频流，正在解码音频…';
             updateSummaryLoading(item, 40, '发现独立音频流，正在解码…');
             audio = await extractAudioFromUrl(audioCandidate);
           }
         }
         if (state.cancelled || item.closed) { state.busy = false; return; }
+        if (!audio && boundAudioCandidate) {
+          // The audio URL is small and can be transcribed directly by the
+          // background worker even when the page's AudioContext cannot decode
+          // the container locally.
+          payload = { kind: 'audio', url: boundAudioCandidate.url, returnTranscript: true, prompt: aiConfig.mediaAudioPrompt || MEDIA_AUDIO_PROMPT };
+          if (status) status.textContent = '已取得当前视频音轨，正在交给后台转写…';
+          updateSummaryLoading(item, 48, '已取得当前视频音轨，正在交给后台转写…');
+          if (meta) meta.textContent = '已取得当前视频的独立音轨 · 正在转写…';
+        }
         // Direct downloads fail for MSE/blob DRM-free players.  Fall back to
         // capturing only the audio track from the actual <video> element, so
         // the model still receives audio (never a raw video).  Douyin often
@@ -13559,7 +14297,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           : (/douyin\.com|iesdouyin\.com/i.test(location.hostname) ? findCaptureVideoElement() : null);
         let backgroundVideo = null;
         const captureSpeed = Math.max(2, Math.min(8, Number(settings.captureRate) || 4));
-        if (!audio && captureElement && String(captureElement.tagName || '').toUpperCase() === 'VIDEO') {
+        if (!audio && !audioTranscript && payload.kind !== 'audio' && captureElement && String(captureElement.tagName || '').toUpperCase() === 'VIDEO') {
           // Try an off-screen clone first.  The visible player keeps playing at
           // normal speed while the clone is decoded at 4x/5x and recorded.
           backgroundVideo = await createBackgroundVideo(captureElement);
@@ -13602,12 +14340,20 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
             status.textContent = '该视频无法后台克隆，已停止录制；请重试或刷新页面。';
           }
         }
-        if (audio) {
+        if (audioTranscript) {
+          payload = { kind: 'audio', transcript: audioTranscript, returnTranscript: true, prompt: aiConfig.mediaAudioPrompt || MEDIA_AUDIO_PROMPT };
+          state.candidate.kind = 'audio';
+          updateSummaryLoading(item, 68, '音轨转写完成，正在生成总结…');
+          if (status) status.textContent = '音轨转写完成，正在生成总结…';
+        } else if (audio) {
           payload = { kind: 'audio', dataUrl: audio.dataUrl, audioChunks: audio.chunks || [audio.dataUrl], returnTranscript: true, prompt: aiConfig.mediaAudioPrompt || MEDIA_AUDIO_PROMPT };
           state.candidate.kind = 'audio';
           updateSummaryLoading(item, 58, '音频提取完成，正在上传到硅基流动…');
           if (meta && audio.duration) meta.textContent = '本地音轨已转为 WAV · ' + Math.round(audio.duration) + ' 秒';
           if (status) status.textContent = '音频提取完成，正在上传到硅基流动…';
+        } else if (payload.kind === 'audio' && payload.url) {
+          if (status) status.textContent = '已取得当前视频独立音轨，正在上传到硅基流动…';
+          updateSummaryLoading(item, 58, '已取得当前视频独立音轨，正在上传到硅基流动…');
         } else if (status) {
           updateSummaryLoading(item, 45, '视频音轨转换失败；未发送原始视频');
           status.textContent = '视频音轨转换失败，已停止（不会把原始视频发给模型）';
@@ -13642,7 +14388,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         revealSummaryWindow(item);
         return;
       }
-      if (!payload.dataUrl) {
+      if (!payload.dataUrl && !(payload.kind === 'audio' && (payload.url || payload.transcript))) {
         if (candidate.srcKind === 'blob') {
           if (status) status.textContent = '正在读取 Blob 媒体…';
           const blob = await readBlobMedia(candidate);
@@ -13710,7 +14456,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       const elapsed = state.startedAt ? Math.max(0.1, (Date.now() - state.startedAt) / 1000).toFixed(1) : '';
       if (status) status.textContent = '已加载完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : '');
       if (progress) progress.style.width = '100%';
-      if (meta) meta.textContent = '总结来源：' + (result.kind === 'audio' ? '音频（ASR）' : '媒体') + ' · 模型 ' + (result.model || 'ASR') + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : '') + (result.size ? ' · ' + Math.round(result.size / 1024 / 1024) + 'MB' : '');
+      if (meta) meta.textContent = (state.boundTitle ? '当前视频：' + state.boundTitle + ' · ' : '') + '总结来源：' + (result.kind === 'audio' ? '音频（ASR）' : '媒体') + ' · 模型 ' + (result.model || 'ASR') + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : '') + (result.size ? ' · ' + Math.round(result.size / 1024 / 1024) + 'MB' : '');
       publishSidePanel(item, '总结完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : ''), 'good');
       updateSummaryLoading(item, 100, '总结完成' + (elapsed ? ' · 耗时 ' + elapsed + ' 秒' : ''));
       setTimeout(() => revealSummaryWindow(item), 220);

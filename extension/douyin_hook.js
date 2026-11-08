@@ -10,6 +10,7 @@
   var mseChunks = [];
   var mseBytes = 0;
   var mseSourceSeq = 0;
+  var mseBufferSeq = 0;
   var mseBlobOwners = Object.create(null);
   var MSE_MAX_BYTES = 72 * 1024 * 1024;
   function cleanUrl(value) {
@@ -19,6 +20,9 @@
     var url = cleanUrl(value);
     if (!/^https?:\/\//i.test(url)) return false;
     if (/^(blob:|data:)/i.test(url)) return false;
+    // ByteEffect hosts short UI/effect previews, not the feed video.  They are
+    // ordinary MP4s and used to pollute the "current media" fallback.
+    if (/byteeffecttos\.com|effectcdn/i.test(url)) return false;
     return /(douyinvod|video\/tos|aweme\/v1\/play|mime_type=video|mime_type=audio|music|audio|video_id=|\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.flv(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?))/i.test(url);
   }
   function report(url) {
@@ -53,9 +57,17 @@
     if (event.data.source === 'LPS_DOUYIN_MSE_REQUEST') {
       var requestId = event.data.id || '';
       var requestedOwner = mseBlobOwners[String(event.data.blobUrl || '')] || 0;
-      var selected = requestedOwner
+      // Without an owner match we cannot prove these chunks belong to the
+      // player the user clicked.  Return nothing rather than borrowing another
+      // preloaded player's audio.
+      var owned = requestedOwner
         ? mseChunks.filter(function (chunk) { return chunk.owner === requestedOwner; })
-        : mseChunks;
+        : [];
+      // The content script only needs the audio SourceBuffer.  Posting every
+      // video fragment as well made large structured-clone messages fail and
+      // left the caller with an empty chunk list.
+      var audioOnly = owned.filter(function (chunk) { return /audio/i.test(String(chunk.mime || '')); });
+      var selected = audioOnly.length ? audioOnly : owned;
       try {
         window.postMessage({
           source: 'LPS_DOUYIN_MSE_RESULT',
@@ -98,7 +110,11 @@
         var buffer = originalAdd.apply(this, arguments);
         try {
           if (!this.__lpsMseOwner) this.__lpsMseOwner = ++mseSourceSeq;
-          buffer.__lpsMseId = this.__lpsMseOwner;
+          // `id` identifies one SourceBuffer; `owner` identifies its
+          // MediaSource.  They must be separate: audio and video SourceBuffers
+          // of one player share an owner but are different mime tracks.
+          if (!buffer.__lpsMseId) buffer.__lpsMseId = ++mseBufferSeq;
+          buffer.__lpsMseOwner = this.__lpsMseOwner;
           buffer.__lpsMseType = String(mime || '');
         } catch (e) { /* ignore */ }
         return buffer;
@@ -122,7 +138,7 @@
               if (mseBytes + copy.byteLength <= MSE_MAX_BYTES) {
                 mseChunks.push({
                   id: this.__lpsMseId || 0,
-                  owner: this.__lpsMseId || 0,
+                  owner: this.__lpsMseOwner || 0,
                   mime: mime,
                   at: Date.now(),
                   data: copy
@@ -673,13 +689,51 @@ function generate_a_bogus(url_search_params, user_agent) {
     return '';
   }
   function lpsAwemeId(preferred) {
+    function idFromVideo(video) {
+      if (!video) return '';
+      var attrNames = ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id', 'data-itemid', 'data-vid', 'data-e2e-vid', 'data-id'];
+      var node = video;
+      for (var depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+        for (var ai = 0; ai < attrNames.length; ai++) {
+          var value = node.getAttribute && node.getAttribute(attrNames[ai]);
+          if (value && /^\d{10,}$/.test(String(value))) return String(value);
+        }
+        if (node.attributes) {
+          for (var di = 0; di < node.attributes.length; di++) {
+            var attr = node.attributes[di];
+            if (/(aweme|video|item|vid)/i.test(attr.name) && /^\d{10,}$/.test(String(attr.value))) return String(attr.value);
+          }
+        }
+        // The detail player's wrapper is `.video_<aweme_id>` but carries no
+        // data-aweme-id attribute.  This exact class is a stronger owner signal
+        // than the address bar and is stable across Douyin player builds.
+        var className = String((node.className && node.className.baseVal !== undefined) ? node.className.baseVal : (node.className || ''));
+        var classMatch = className.match(/(?:^|[\s_-])video[_-]?(\d{10,})(?=$|[\s_-])/i);
+        if (classMatch) return classMatch[1];
+        if (node.outerHTML) {
+          var outer = String(node.outerHTML);
+          var opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));
+          var hm = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);
+          if (hm) return hm[1];
+        }
+        if (depth < 3) {
+          var reactId = reactAwemeId(node);
+          if (reactId) return reactId;
+        }
+      }
+      return '';
+    }
+    // The marked node is the exact player that opened the summary.  Its DOM id
+    // always outranks a caller-supplied id, the address bar and API caches.
+    var marked = null;
+    try { marked = document.querySelector('[data-lps-current-video]'); } catch (e) { /* ignore */ }
+    if (marked) {
+      var markedId = idFromVideo(marked);
+      if (markedId) return markedId;
+    }
     if (preferred && /^\d{10,}$/.test(String(preferred))) return String(preferred);
-    // Recommendation pages often keep the URL unchanged when the next clip
-    // starts.  Read the data attribute from the currently playing/visible
-    // player before trusting the potentially stale address bar.
-    var domFound = '';
+    var videos = marked ? [marked] : Array.prototype.slice.call(document.querySelectorAll('video'));
     try {
-      var videos = Array.prototype.slice.call(document.querySelectorAll('video'));
       videos.sort(function (a, b) {
         var score = function (v) {
           var s = 0;
@@ -692,46 +746,18 @@ function generate_a_bogus(url_search_params, user_agent) {
           } catch (e) { /* ignore */ }
           return s;
         };
-        var am = a.hasAttribute && a.hasAttribute('data-lps-current-video') ? 1 : 0;
-        var bm = b.hasAttribute && b.hasAttribute('data-lps-current-video') ? 1 : 0;
-        return (bm - am) || (score(b) - score(a));
+        return score(b) - score(a);
       });
-      var attrNames = ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id', 'data-itemid', 'data-vid', 'data-e2e-vid', 'data-id'];
-      for (var vi = 0; vi < videos.length && !domFound; vi++) {
-        var node = videos[vi];
-        for (var depth = 0; node && depth < 8 && !domFound; depth++, node = node.parentElement) {
-          for (var ai = 0; ai < attrNames.length; ai++) {
-            var value = node.getAttribute && node.getAttribute(attrNames[ai]);
-            if (value && /^\d{10,}$/.test(String(value))) { domFound = String(value); break; }
-          }
-          if (!domFound && node.attributes) {
-            for (var di = 0; di < node.attributes.length; di++) {
-              var attr = node.attributes[di];
-              if (/(aweme|video|item|vid|id)/i.test(attr.name) && /^\d{10,}$/.test(String(attr.value))) {
-                domFound = String(attr.value);
-                break;
-              }
-            }
-          }
-          if (!domFound && node.outerHTML) {
-            var outer = String(node.outerHTML);
-            var opening = outer.slice(0, Math.max(0, outer.indexOf('>') + 1));
-            var hm = opening.match(/(?:aweme[_-]?id|video[_-]?id|item[_-]?id|vid|data-id)["'\s:=]+(\d{10,})/i);
-            if (hm) domFound = hm[1];
-          }
-          if (!domFound && depth < 3) {
-            var reactId = reactAwemeId(node);
-            if (reactId) domFound = reactId;
-          }
-        }
-      }
     } catch (e) { /* ignore */ }
-    if (domFound) return domFound;
-    if (lastApiAwemeId) return lastApiAwemeId;
+    for (var vi = 0; vi < videos.length; vi++) {
+      var domId = idFromVideo(videos[vi]);
+      if (domId) return domId;
+    }
     try {
       var urlMatch = location.pathname.match(/\/video\/(\d+)/) || location.search.match(/[?&](?:modal_id|aweme_id)=(\d+)/);
       if (urlMatch) return urlMatch[1];
     } catch (e) { /* ignore */ }
+    if (lastApiAwemeId) return lastApiAwemeId;
     var found = '';
     function scan(node, depth) {
       if (!node || depth > 8 || found) return;
@@ -766,27 +792,46 @@ function generate_a_bogus(url_search_params, user_agent) {
   function lpsExtractDetailUrls(detail) {
     var audio = [];
     var video = [];
+    var music = [];
     function add(target, value) {
       if (!value) return;
-      if (typeof value === 'string' && /^https?:\/\//i.test(value) && target.indexOf(value) < 0) target.push(value);
-      if (Array.isArray(value)) value.forEach(function (item) { add(target, item); });
-      if (typeof value === 'object') {
-        (value.url_list || []).forEach(function (item) { add(target, item); });
-        if (value.play_url) add(target, value.play_url);
-        if (value.play_addr) add(target, value.play_addr);
+      if (typeof value === 'string') {
+        var clean = cleanUrl(value);
+        if (/^https?:\/\//i.test(clean) && target.indexOf(clean) < 0) target.push(clean);
+        return;
       }
+      if (Array.isArray(value)) {
+        value.forEach(function (item) { add(target, item); });
+        return;
+      }
+      if (typeof value !== 'object') return;
+      if (value.url_list) add(target, value.url_list);
+      // `bit_rate_audio[].audio_meta.url_list` is an object with main_url,
+      // backup_url and fallback_url.  Reading only arrays dropped the
+      // audio-only DASH track and forced a full video download.
+      if (value.audio_meta) add(target, value.audio_meta);
+      if (value.play_url) add(target, value.play_url);
+      if (value.play_addr) add(target, value.play_addr);
+      ['main_url', 'backup_url', 'fallback_url', 'url'].forEach(function (key) {
+        if (value[key]) add(target, value[key]);
+      });
     }
-    add(audio, detail && detail.music && detail.music.play_url);
-    add(audio, detail && detail.music && detail.music.play_url_h265);
-    add(audio, detail && detail.music && detail.music.play_url_h264);
-    add(video, detail && detail.video && detail.video.play_addr);
-    add(video, detail && detail.video && detail.video.play_addr_h264);
-    add(video, detail && detail.video && detail.video.play_addr_h265);
-    add(video, detail && detail.video && detail.video.play_addr_bytevc1);
-    add(video, detail && detail.video && detail.video.play_addr_265);
-    add(video, detail && detail.video && detail.video.play_addr_264);
-    add(video, detail && detail.video && detail.video.bit_rate);
-    return { audio: audio, video: video };
+    var videoInfo = (detail && detail.video) || {};
+    // Real audio tracks first.  `music.play_url` is the creator's background
+    // music and must never be used as the spoken audio of the video.
+    add(audio, videoInfo.bit_rate_audio);
+    add(audio, videoInfo.audio);
+    add(video, videoInfo.play_addr);
+    add(video, videoInfo.play_addr_h264);
+    add(video, videoInfo.play_addr_h265);
+    add(video, videoInfo.play_addr_bytevc1);
+    add(video, videoInfo.play_addr_265);
+    add(video, videoInfo.play_addr_264);
+    add(video, videoInfo.bit_rate);
+    add(music, detail && detail.music && detail.music.play_url);
+    add(music, detail && detail.music && detail.music.play_url_h265);
+    add(music, detail && detail.music && detail.music.play_url_h264);
+    return { audio: audio, video: video, music: music };
   }
   window.addEventListener('message', function (event) {
     if (event.source !== window || !event.data || event.data.source !== 'LPS_DOUYIN_DETAIL') return;
@@ -798,15 +843,46 @@ function generate_a_bogus(url_search_params, user_agent) {
       var awemeId = lpsAwemeId(event.data.awemeId || '');
       if (!awemeId) { reply({ ok: false, detail: '没有找到 aweme_id' }); return; }
       var query = lpsDetailParams(awemeId);
-      var aBogus = generate_a_bogus(query, navigator.userAgent);
-      var url = 'https://www.douyin.com/aweme/v1/web/aweme/detail/?' + query + '&a_bogus=' + encodeURIComponent(aBogus);
-      fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json, text/plain, */*' } })
-        .then(function (response) { return response.json(); })
+      var aBogus = '';
+      // Some Douyin builds throw inside the bundled signature helper.  The
+      // detail endpoint still accepts a cookie-authenticated request without
+      // a_bogus; losing the whole detail response also loses the direct video
+      // URL and forces an incomplete MSE capture.
+      try { aBogus = String(generate_a_bogus(query, navigator.userAgent) || ''); } catch (e) { aBogus = ''; }
+      var base = 'https://www.douyin.com/aweme/v1/web/aweme/detail/';
+      var fullUrl = base + '?' + query + (aBogus ? '&a_bogus=' + encodeURIComponent(aBogus) : '');
+      var minimalParams = new URLSearchParams({
+        aweme_id: awemeId,
+        device_platform: 'webapp',
+        aid: '6383',
+        channel: 'channel_pc_web',
+        pc_client_type: '1',
+        version_code: '290100',
+        version_name: '29.1.0',
+        browser_language: 'zh-CN',
+        browser_platform: 'Win32',
+        browser_name: 'Edge',
+        browser_version: '131.0.0.0'
+      });
+      var minimalUrl = base + '?' + minimalParams.toString();
+      function fetchDetailJson(url) {
+        return fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json, text/plain, */*' } })
+          .then(function (response) { return response.text(); })
+          .then(function (text) {
+            if (/^\s*Blocked by/i.test(String(text || ''))) throw new Error('detail blocked');
+            return JSON.parse(text);
+          });
+      }
+      fetchDetailJson(fullUrl).catch(function () { return fetchDetailJson(minimalUrl); })
         .then(function (data) {
           var detail = data && (data.aweme_detail || data.awemeDetail || data.detail);
           if (!detail) { reply({ ok: false, detail: '详情接口没有返回 aweme_detail' }); return; }
           var urls = lpsExtractDetailUrls(detail);
-          reply({ ok: !!(urls.audio.length || urls.video.length), audio: urls.audio, video: urls.video, title: String(detail.desc || document.title || ''), awemeId: awemeId, duration: Number(detail.video && detail.video.duration) || 0 });
+          // Report the id the server actually returned, not the one we asked
+          // for.  Echoing the request made mismatched detail responses look
+          // valid and allowed the wrong clip to be accepted.
+          var returnedId = String(detail.aweme_id || detail.awemeId || '');
+          reply({ ok: !!(urls.audio.length || urls.video.length), audio: urls.audio, video: urls.video, music: urls.music, title: String(detail.desc || document.title || ''), awemeId: returnedId, duration: Number(detail.video && detail.video.duration) || 0 });
         })
         .catch(function (error) { reply({ ok: false, detail: String(error && error.message || '详情请求失败') }); });
     } catch (e) {

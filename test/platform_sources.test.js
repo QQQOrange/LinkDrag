@@ -17,6 +17,31 @@ test('Douyin detail API and bit_rate play_addr are part of the resolver', () => 
   assert.match(background, /collectDouyinApiUrls/);
 });
 
+test('Douyin detail resolver keeps audio-only tracks and reuses a first-party tab', () => {
+  const background = read('extension/background.js');
+  const content = read('src/extension.content.js');
+  assert.match(background, /collectDouyinApiAudioUrls/);
+  assert.match(background, /bit_rate_audio/);
+  assert.match(background, /audio_meta/);
+  assert.match(background, /resolveDouyinViaTab/);
+  assert.match(background, /chrome\.tabs\.create\(\{ url: 'https:\/\/www\.douyin\.com\/video\/'/);
+  assert.match(background, /chrome\.tabs\.query\(\{ url: \['https:\/\/\*\.douyin\.com\/\*'/);
+  assert.match(content, /requestDouyinResolve/);
+  assert.match(content, /openDouyinLinkSummary/);
+  assert.match(content, /ldp:summary-link/);
+});
+
+test('video downloads send a first-party Referer', () => {
+  const background = read('extension/background.js');
+  const content = read('src/extension.content.js');
+  const rules = JSON.parse(read('extension/rules.json'));
+  assert.match(content, /type: 'ldp:downloadMedia'/);
+  assert.match(content, /fetch\(url, \{ credentials: 'same-origin' \}\)/);
+  assert.match(background, /saveAs: false/);
+  assert.ok(rules.some(rule => /douyinvod/.test(rule.condition.urlFilter)
+    && rule.condition.resourceTypes.includes('other')));
+});
+
 test('platform page declarations and CDN patterns are covered', () => {
   const source = read('src/extension.content.js');
   assert.match(source, /pageDeclaredMediaUrls/);

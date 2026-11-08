@@ -86,7 +86,7 @@ async function transcribeRemote(request) {
   }
   let res;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 120000);
+  const timer = setTimeout(() => controller.abort(), 300000);
   try {
     res = await fetch(url, { credentials: 'include', redirect: 'follow', headers, signal: controller.signal });
   } catch (e) {
@@ -105,7 +105,13 @@ async function transcribeRemote(request) {
   if (bytes.byteLength > 120 * 1024 * 1024) return { ok: false, reason: 'too-large', detail: '音频超过 120MB' };
   let audio;
   try {
-    const context = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    let context;
+    // Long podcasts can be 30–60 minutes.  Decoding them at 48 kHz creates a
+    // huge AudioBuffer; 16 kHz is all the ASR pipeline needs and cuts memory
+    // to one third.
+    try { context = new AudioCtor({ sampleRate: 16000 }); }
+    catch (e) { context = new AudioCtor(); }
     audio = await context.decodeAudioData(bytes.slice(0));
     try { context.close(); } catch (e) { /* ignore */ }
   } catch (e) {
@@ -115,18 +121,36 @@ async function transcribeRemote(request) {
   const chunkSeconds = Number(request.chunkSeconds) || 300;
   const totalFrames = Math.ceil(audio.duration * sampleRate);
   const chunkFrames = Math.max(1, Math.round(sampleRate * chunkSeconds));
-  const parts = [];
   const totalChunks = Math.ceil(totalFrames / chunkFrames);
   if (!totalChunks || !Number.isFinite(totalChunks)) return { ok: false, reason: 'empty-audio' };
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * chunkFrames;
-    const end = Math.min(totalFrames, start + chunkFrames);
-    const chunk = await blobToDataUrl(wavChunk(audio, sampleRate, start, end));
-    if (!chunk) return { ok: false, reason: 'encode', detail: '第 ' + (i + 1) + ' 段编码失败' };
-    const one = await transcribeAudioFile(chunk, endpoint, key, model);
-    if (!one.ok) return { ok: false, reason: 'asr', detail: '第 ' + (i + 1) + '/' + totalChunks + ' 段：' + (one.detail || one.reason || '转写失败') };
-    parts.push(one.text);
-  }
+  const parts = new Array(totalChunks);
+  let nextChunk = 0;
+  let failure = null;
+  const worker = async () => {
+    while (!failure) {
+      const index = nextChunk++;
+      if (index >= totalChunks) return;
+      const start = index * chunkFrames;
+      const end = Math.min(totalFrames, start + chunkFrames);
+      const chunk = await blobToDataUrl(wavChunk(audio, sampleRate, start, end));
+      if (!chunk) {
+        failure = { reason: 'encode', detail: '第 ' + (index + 1) + ' 段编码失败' };
+        return;
+      }
+      const one = await transcribeAudioFile(chunk, endpoint, key, model);
+      if (!one.ok) {
+        failure = { reason: 'asr', detail: '第 ' + (index + 1) + '/' + totalChunks + ' 段：' + (one.detail || one.reason || '转写失败') };
+        return;
+      }
+      parts[index] = one.text;
+    }
+  };
+  // Two in-flight chunks keep the ASR endpoint busy without flooding it.  The
+  // old sequential loop made a 36-minute video wait for every 5-minute upload
+  // one after another even when the provider accepted concurrent requests.
+  const concurrency = Math.min(2, totalChunks);
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  if (failure) return { ok: false, reason: failure.reason, detail: failure.detail };
   return { ok: true, text: parts.join('\n'), chunks: totalChunks, duration: audio.duration };
 }
 

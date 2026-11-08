@@ -15,7 +15,8 @@
     "condition": {
       "urlFilter": "||douyinvod.com",
       "resourceTypes": [
-        "xmlhttprequest"
+        "xmlhttprequest",
+        "other"
       ]
     }
   },
@@ -35,7 +36,8 @@
     "condition": {
       "urlFilter": "||byteicdn.com",
       "resourceTypes": [
-        "xmlhttprequest"
+        "xmlhttprequest",
+        "other"
       ]
     }
   },

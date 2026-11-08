@@ -773,7 +773,7 @@ async function fetchHlsDataUrl(url, depth) {
 }
 
 function collectDouyinApiUrls(value, out, depth) {
-  if (!value || depth > 12 || out.length >= 16) return;
+  if (!value || depth > 12 || out.length >= 24) return;
   if (Array.isArray(value)) {
     for (const item of value) collectDouyinApiUrls(item, out, depth + 1);
     return;
@@ -794,6 +794,57 @@ function collectDouyinApiUrls(value, out, depth) {
     }
     collectDouyinApiUrls(child, out, depth + 1);
   }
+}
+
+// `bit_rate_audio[].audio_meta.url_list` is an object (main_url/backup_url/
+// fallback_url), not the usual `url_list` array.  The old walker only read
+// arrays, so the clean audio-only DASH track was always missed and the plugin
+// downloaded a much larger muxed MP4 just to extract its AAC track.
+function collectDouyinApiAudioUrls(value, out, depth) {
+  if (!value || depth > 12 || out.length >= 8) return;
+  const add = raw => {
+    const url = String(raw || '').replace(/\\u002F/gi, '/').replace(/\\\//g, '/');
+    if (/^https?:\/\//i.test(url) && !out.includes(url)) out.push(url);
+  };
+  if (typeof value === 'string') { add(value); return; }
+  if (Array.isArray(value)) {
+    for (const item of value) collectDouyinApiAudioUrls(item, out, depth + 1);
+    return;
+  }
+  if (typeof value !== 'object') return;
+  if (value.audio_meta) collectDouyinApiAudioUrls(value.audio_meta, out, depth + 1);
+  if (value.url_list) {
+    if (Array.isArray(value.url_list)) collectDouyinApiAudioUrls(value.url_list, out, depth + 1);
+    else collectDouyinApiAudioUrls(value.url_list, out, depth + 1);
+  }
+  for (const key of ['main_url', 'backup_url', 'fallback_url', 'url', 'play_url', 'play_addr']) {
+    if (value[key]) collectDouyinApiAudioUrls(value[key], out, depth + 1);
+  }
+}
+
+function douyinResultFromDetail(detail) {
+  if (!detail || !detail.video) return null;
+  const video = detail.video;
+  const videos = [];
+  const audios = [];
+  collectDouyinApiUrls(video.bit_rate || [], videos, 0);
+  collectDouyinApiUrls(video, videos, 0);
+  collectDouyinApiAudioUrls(video.bit_rate_audio || [], audios, 0);
+  collectDouyinApiAudioUrls(video.audio || {}, audios, 0);
+  videos.sort((a, b) => (b.height || 0) - (a.height || 0));
+  const urls = videos.map(item => item.url);
+  if (!urls.length && !audios.length) return null;
+  return {
+    ok: true,
+    url: urls[0] || audios[0] || '',
+    urls,
+    video: urls,
+    audio: audios,
+    audioUrls: audios,
+    title: String(detail.desc || '').trim(),
+    videoId: String(detail.aweme_id || ''),
+    duration: Math.round((Number(video.duration) || 0) / 1000)
+  };
 }
 
 async function resolveDouyinApi(videoId) {
@@ -819,20 +870,10 @@ async function resolveDouyinApi(videoId) {
   let data = null;
   try { data = await res.json(); } catch (e) { return null; }
   const detail = data && (data.aweme_detail || (Array.isArray(data.aweme_detail_list) ? data.aweme_detail_list[0] : null));
-  const video = detail && detail.video;
-  if (!video) return null;
-  const urls = [];
-  collectDouyinApiUrls(video.bit_rate || [], urls, 0);
-  collectDouyinApiUrls(video, urls, 0);
-  urls.sort((a, b) => (b.height || 0) - (a.height || 0));
-  return {
-    ok: true,
-    url: urls[0] && urls[0].url || '',
-    urls: urls.map(item => item.url),
-    title: String(detail.desc || '').trim(),
-    videoId: String(detail.aweme_id || videoId),
-    duration: Math.round((Number(video.duration) || 0) / 1000)
-  };
+  if (!detail || !detail.video) return null;
+  const result = douyinResultFromDetail(detail);
+  if (result && !result.videoId) result.videoId = String(videoId);
+  return result;
 }
 
 async function resolveDouyinItemInfo(videoId) {
@@ -853,21 +894,11 @@ async function resolveDouyinItemInfo(videoId) {
     if (!res.ok) return null;
     const data = await res.json();
     const item = data && Array.isArray(data.item_list) ? data.item_list[0] : null;
-    const video = item && item.video;
-    if (!video) return null;
-    const urls = [];
-    collectDouyinApiUrls(video.bit_rate || [], urls, 0);
-    collectDouyinApiUrls(video, urls, 0);
-    urls.sort((a, b) => (b.height || 0) - (a.height || 0));
-    if (!urls.length) return null;
-    return {
-      ok: true,
-      url: urls[0].url,
-      urls: urls.map(item => item.url),
-      title: String(item.desc || '').trim(),
-      videoId: String(item.aweme_id || id),
-      duration: Math.round((Number(video.duration) || 0) / 1000)
-    };
+    if (!item || !item.video) return null;
+    const result = douyinResultFromDetail(item);
+    if (!result) return null;
+    if (!result.videoId) result.videoId = String(id);
+    return result;
   } catch (e) {
     return null;
   } finally {
@@ -922,6 +953,109 @@ async function resolveKuaishou(input) {
   }
 }
 
+function waitForTabComplete(tabId, timeoutMs) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { chrome.tabs.onUpdated.removeListener(listener); } catch (e) { /* ignore */ }
+      resolve();
+    };
+    const timer = setTimeout(finish, Math.max(1000, Number(timeoutMs) || 20000));
+    const listener = (id, info) => { if (id === tabId && info && info.status === 'complete') finish(); };
+    try { chrome.tabs.onUpdated.addListener(listener); } catch (e) { finish(); return; }
+    try {
+      chrome.tabs.get(tabId).then(tab => { if (tab && tab.status === 'complete') finish(); }, finish);
+    } catch (e) { finish(); }
+  });
+}
+
+async function resolveDouyinDetailInTab(tabId, videoId, attempts) {
+  const id = String(videoId || '');
+  let last = null;
+  for (let attempt = 0; attempt < Math.max(1, Number(attempts) || 3); attempt++) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: async awemeId => {
+          const query = new URLSearchParams({
+            aweme_id: awemeId,
+            device_platform: 'webapp',
+            aid: '6383',
+            channel: 'channel_pc_web',
+            pc_client_type: '1',
+            version_code: '290100',
+            version_name: '29.1.0',
+            browser_language: 'zh-CN',
+            browser_platform: 'Win32',
+            browser_name: 'Edge',
+            browser_version: '131.0.0.0'
+          });
+          try {
+            const response = await fetch('https://www.douyin.com/aweme/v1/web/aweme/detail/?' + query.toString(), {
+              credentials: 'include',
+              headers: { 'Accept': 'application/json, text/plain, */*' }
+            });
+            const text = await response.text();
+            if (!response.ok || /^\s*Blocked by/i.test(text)) {
+              return { ok: false, reason: 'http', detail: '抖音详情 HTTP ' + response.status + (text ? '：' + text.slice(0, 120) : '') };
+            }
+            const data = JSON.parse(text);
+            const detail = data && data.aweme_detail;
+            return detail ? { ok: true, detail } : { ok: false, reason: 'no-media', detail: '抖音详情没有返回 aweme_detail' };
+          } catch (error) {
+            return { ok: false, reason: 'network', detail: String(error && error.message || error).slice(0, 180) };
+          }
+        },
+        args: [id]
+      });
+      const result = results && results[0] && results[0].result;
+      if (result && result.ok && result.detail) {
+        const parsed = douyinResultFromDetail(result.detail);
+        if (parsed) return parsed;
+      }
+      last = result || last;
+    } catch (e) {
+      last = { ok: false, reason: 'inject', detail: String(e && e.message || e).slice(0, 180) };
+    }
+    if (attempt < Math.max(1, Number(attempts) || 3) - 1) await new Promise(resolve => setTimeout(resolve, 1200));
+  }
+  return last;
+}
+
+// The detail endpoint requires first-party Douyin cookies (`UIFID` is
+// SameSite=Lax), so an extension-origin fetch gets 403 even though the URL is
+// public.  Use an already-open Douyin tab when possible; otherwise a
+// short-lived inactive tab makes the request and is closed in `finally`.
+async function resolveDouyinViaTab(videoId) {
+  const id = String(videoId || '');
+  if (!/^\d{10,}$/.test(id) || !chrome.tabs || !chrome.tabs.create || !chrome.scripting) return null;
+  let created = null;
+  try {
+    let existing = [];
+    try {
+      existing = await chrome.tabs.query({ url: ['https://*.douyin.com/*', 'http://*.douyin.com/*'] });
+    } catch (e) { existing = []; }
+    for (const tab of (existing || []).filter(tab => tab && tab.id && tab.status === 'complete').slice(0, 3)) {
+      const result = await resolveDouyinDetailInTab(tab.id, id, 2);
+      if (result && result.ok) return result;
+    }
+    created = await chrome.tabs.create({ url: 'https://www.douyin.com/video/' + id, active: false });
+    if (!created || !created.id) return null;
+    await waitForTabComplete(created.id, 22000);
+    return (await resolveDouyinDetailInTab(created.id, id, 3)) || { ok: false, reason: 'no-media', detail: '抖音页面没有返回视频数据' };
+  } catch (e) {
+    return { ok: false, reason: 'network', detail: String(e && e.message || e).slice(0, 180) };
+  } finally {
+    if (created && created.id) {
+      try { chrome.tabs.remove(created.id); } catch (e) { /* ignore */ }
+    }
+  }
+}
+
 async function resolveDouyinShare(input) {
   const source = String(input || '').trim();
   if (!/^https?:\/\//i.test(source)) return { ok: false, reason: 'invalid-url' };
@@ -956,37 +1090,53 @@ async function resolveDouyinShare(input) {
         if (itemResult && itemResult.url) return itemResult;
       } catch (e) { /* share-page fallback below */ }
     }
-    const pageUrl = 'https://www.iesdouyin.com/share/video/' + idMatch[1];
-    const res = await fetch(pageUrl, { redirect: 'follow', headers: { 'User-Agent': mobileUA, Referer: 'https://www.iesdouyin.com/' } });
-    if (!res.ok) return { ok: false, reason: 'http', detail: '抖音分享页 HTTP ' + res.status };
-    const html = await res.text();
-    const marker = html.indexOf('window._ROUTER_DATA');
-    const start = marker >= 0 ? html.indexOf('{', marker) : -1;
-    if (start < 0) return { ok: false, reason: 'parse', detail: '未找到 _ROUTER_DATA' };
-    let depth = 0, quote = '', escaped = false, end = -1;
-    for (let i = start; i < html.length; i++) {
-      const ch = html[i];
-      if (quote) {
-        if (escaped) escaped = false;
-        else if (ch === '\\') escaped = true;
-        else if (ch === quote) quote = '';
-        continue;
+    // The mobile share page used to embed the complete `videoInfoRes`; current
+    // builds only ship layout metadata, so this is a compatibility path rather
+    // than the primary resolver.
+    let shareFailure = null;
+    try {
+      const pageUrl = 'https://www.iesdouyin.com/share/video/' + idMatch[1];
+      const res = await fetch(pageUrl, { redirect: 'follow', headers: { 'User-Agent': mobileUA, Referer: 'https://www.iesdouyin.com/' } });
+      if (!res.ok) throw new Error('抖音分享页 HTTP ' + res.status);
+      const html = await res.text();
+      const marker = html.indexOf('window._ROUTER_DATA');
+      const start = marker >= 0 ? html.indexOf('{', marker) : -1;
+      if (start < 0) throw new Error('未找到 _ROUTER_DATA');
+      let depth = 0, quote = '', escaped = false, end = -1;
+      for (let i = start; i < html.length; i++) {
+        const ch = html[i];
+        if (quote) {
+          if (escaped) escaped = false;
+          else if (ch === '\\') escaped = true;
+          else if (ch === quote) quote = '';
+          continue;
+        }
+        if (ch === '"' || ch === "'") { quote = ch; continue; }
+        if (ch === '{') depth++;
+        else if (ch === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
       }
-      if (ch === '"' || ch === "'") { quote = ch; continue; }
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+      if (end < 0) throw new Error('抖音页面数据不完整');
+      const data = JSON.parse(html.slice(start, end));
+      const loader = data && data.loaderData || {};
+      const page = loader['video_(id)/page'] || loader['note_(id)/page'] || Object.values(loader).find(value => value && value.videoInfoRes);
+      const info = page && page.videoInfoRes;
+      const item = info && Array.isArray(info.item_list) ? info.item_list[0] : null;
+      const play = item && item.video && item.video.play_addr && Array.isArray(item.video.play_addr.url_list) ? item.video.play_addr.url_list : [];
+      const url = play.find(value => /^https?:\/\//i.test(String(value || ''))) || '';
+      if (!url) throw new Error('抖音页面没有 play_addr 地址');
+      return { ok: true, url: url.replace(/playwm/g, 'play'), urls: [url.replace(/playwm/g, 'play')], audio: [], title: String(item.desc || '').trim(), videoId: idMatch[1], duration: Math.round((Number(item.video.duration) || 0) / 1000) };
+    } catch (e) {
+      shareFailure = e;
     }
-    if (end < 0) return { ok: false, reason: 'parse', detail: '抖音页面数据不完整' };
-    let data = null;
-    try { data = JSON.parse(html.slice(start, end)); } catch (e) { return { ok: false, reason: 'parse', detail: '抖音页面 JSON 解析失败' }; }
-    const loader = data && data.loaderData || {};
-    const page = loader['video_(id)/page'] || loader['note_(id)/page'] || Object.values(loader).find(value => value && value.videoInfoRes);
-    const info = page && page.videoInfoRes;
-    const item = info && Array.isArray(info.item_list) ? info.item_list[0] : null;
-    const play = item && item.video && item.video.play_addr && Array.isArray(item.video.play_addr.url_list) ? item.video.play_addr.url_list : [];
-    const url = play.find(value => /^https?:\/\//i.test(String(value || ''))) || '';
-    if (!url) return { ok: false, reason: 'no-media', detail: '抖音页面没有 play_addr 地址' };
-    return { ok: true, url: url.replace(/playwm/g, 'play'), title: String(item.desc || '').trim(), videoId: idMatch[1] };
+    // The share page no longer contains play_addr.  Fetch the detail from a
+    // first-party tab so SameSite cookies and page context are present.
+    const viaTab = await resolveDouyinViaTab(idMatch[1]);
+    if (viaTab && viaTab.ok) return viaTab;
+    return {
+      ok: false,
+      reason: (viaTab && viaTab.reason) || 'no-media',
+      detail: (viaTab && viaTab.detail) || (shareFailure && shareFailure.message) || '抖音没有返回视频地址'
+    };
   } catch (e) {
     return { ok: false, reason: 'network', detail: e && e.message ? String(e.message).slice(0, 180) : '' };
   }
@@ -1722,14 +1872,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (type === 'ldp:downloadMedia') {
     const url = String(message.url || '');
     if (!/^https?:\/\//i.test(url)) { sendResponse({ ok: false, reason: 'invalid-url' }); return false; }
+    const filename = String(message.filename || 'media-download').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
     try {
+      // Downloads initiated by the API are "other" requests.  The media DNR
+      // rules add the first-party Referer for Douyin/Bilibili CDNs, which is
+      // required or the CDN answers 403.  DownloadOptions.headers cannot be
+      // used for Referer: Chromium rejects it as an unsafe request header.
       chrome.downloads.download({
         url,
-        filename: String(message.filename || 'media-download').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120),
-        saveAs: true
+        filename,
+        saveAs: false
       }, id => {
-        try { void chrome.runtime.lastError; } catch (e) { /* ignore */ }
-        sendResponse(id ? { ok: true, id } : { ok: false, reason: 'download-failed' });
+        const error = chrome.runtime.lastError;
+        if (id) { sendResponse({ ok: true, id }); return; }
+        sendResponse({ ok: false, reason: 'download-failed', detail: error && error.message ? String(error.message).slice(0, 160) : '' });
       });
     } catch (e) {
       sendResponse({ ok: false, reason: 'download-failed', detail: e && e.message ? e.message : '' });

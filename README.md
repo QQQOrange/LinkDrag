@@ -1,8 +1,8 @@
-﻿# LinkDrag
+# LinkDrag
 
-**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.1.7**.
+**LinkDrag** is a Chromium Manifest V3 extension for previewing links in place, inspecting images at full resolution, and generating AI summaries for pages and media. This is the first public release: **v1.1.14**.
 
-**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.1.7**。
+**LinkDrag** 是一款 Chromium Manifest V3 扩展：直接在网页中预览链接、查看高清原图，并为网页正文和音视频生成 AI 总结。这是第一个正式版本：**v1.1.14**。
 
 <p>
   <a href="#中文">简体中文</a> ·
@@ -26,11 +26,12 @@
 - 站点可单独暂停；工具栏弹窗提供全局开关、当前站点状态、最近预览和快捷入口。
 - 右键菜单可预览链接、选中网址或打开设置。
 - 快捷键 `Alt+Shift+L` 暂停/恢复当前站点，可在浏览器扩展快捷键页修改。
+- 拖动已选中的网页文字只会执行浏览器原生文字拖拽，不会误开链接或图片预览。
 
 #### 图片预览
 
 - 拖拽图片直接查看原图，不会先打开一个缩略网页。
-- 自动从 `srcset`、链接地址和页面候选中选择最高清版本。
+- 自动从 `srcset`、`data-full`/`data-original` 等原图属性、父级链接和链接页的 `og:image` 元数据中选择最高清版本，避免只放大缩略图。
 - 支持图片缩放、平移、适应窗口和会话恢复。
 
 #### AI 页面总结
@@ -42,11 +43,14 @@
 
 #### AI 音视频总结
 
-- 点击视频旁的 AI 按钮或工具栏「总结页面音视频」。
+- 点击视频旁的 AI 按钮或工具栏「总结页面音视频」；按钮只在悬停可播放的主视频时出现，评论区、通知、小图标和隐藏播放器不会显示。
 - 优先读取字幕；没有字幕时优先寻找独立音频流；只有视频时先抽取音轨，再送 ASR，最后把转写文本交给文本 AI。
 - 支持原生 VTT/SRT、YouTube 字幕、Bilibili 字幕与音频流。
-- 多平台媒体发现：抖音、快手、B站、YouTube、TikTok、小红书、Instagram、X/Twitter 等公开视频；优先使用页面声明、JSON-LD、`og:video`/`og:audio` 和平台 CDN 地址。快手额外走 GraphQL 详情接口，抖音走详情 API + 页面/网络多路兜底。
-- 抖音推荐流/精选流单页刷新后会重新绑定当前正在播放的视频，并从最新网络请求、播放器父节点、页面数据和详情接口多路寻找真实媒体地址。
+- 多平台媒体发现：抖音、快手、B站、YouTube、TikTok、小红书、Instagram、X/Twitter 等公开视频；优先使用页面声明、JSON-LD、`og:video`/`og:audio` 和平台 CDN 地址。快手额外走 GraphQL 详情接口，抖音走详情 API + 当前播放器 MSE 音轨兜底。
+- 抖音详情解析会优先读取专用音频 DASH 轨；从其他页面点击抖音分享链接的 AI 按钮时，插件会自动解析视频 ID 并直接进入音频总结，不必先手动打开视频页。
+- 即使视频是通过字幕完成总结，总结窗口仍提供“下载视频”和“下载音频”；首次点击时按需解析详情直链，抖音会返回完整 MP4 与专用 M4A。
+- 性能优化：抖音/TikTok 跳过无意义的字幕等待，普通无字幕视频 3.5 秒后转 ASR；长音频按 2 路并发上传；抖音详情缓存 120 秒；链接只是路过时不会提前构建整张预览 UI。
+- 抖音推荐流/精选流会严格绑定用户点击的播放器：只接受同一 `aweme_id` 的详情结果、页面数据或该播放器自己的 MSE 音轨，不会拿网络请求里未绑定的 MP4 兜底。
 - 音视频总结窗口支持下载视频、下载音频、下载 SRT 字幕和复制总结。
 - **SRT 字幕**：有真实字幕后保留时间轴；纯 ASR 没有时间戳时按媒体时长生成连续、合法的估计时间轴。
 - 媒体流只有在没有可访问的直接地址时才使用播放器音轨捕获作为最后兜底；不会把原始视频直接发给 AI。
@@ -63,7 +67,7 @@
 
 #### 从 ZIP 安装（开发版）
 
-1. 下载 `dist/LinkDrag-v1.1.7.zip` 并解压。
+1. 下载 `dist/LinkDrag-v1.1.14.zip` 并解压。
 2. 打开 `edge://extensions` 或 `chrome://extensions`。
 3. 开启右上角「开发人员模式」。
 4. 点击「加载解压缩的扩展」，选择解压后的 `LinkDrag` 文件夹。
@@ -183,7 +187,7 @@ LinkDrag/
 
 ### 版本
 
-**v1.1.7** — 首个 LinkDrag 正式版本。
+**v1.1.14** — 首个 LinkDrag 正式版本。
 
 ---
 
@@ -202,11 +206,12 @@ LinkDrag/
 - Pause per site; the toolbar popup provides global controls, current-site status, recent previews and shortcuts.
 - Right-click menu for links, selected URLs and settings.
 - `Alt+Shift+L` pauses/resumes the current site; rebind it from the browser's extension shortcuts page.
+- Dragging selected page text keeps the browser's native text drag and never opens a link or image preview.
 
 #### Image preview
 
 - Drag an image to inspect the original, without opening a thumbnail page first.
-- Picks the highest-resolution candidate from `srcset`, the wrapping link and page data.
+- Picks the highest-resolution candidate from `srcset`, `data-full`/`data-original` attributes, wrapping links, and the linked page's `og:image` metadata, so a thumbnail is not merely enlarged.
 - Zoom, pan, fit-to-window and session restore.
 
 #### AI page summaries
@@ -218,11 +223,14 @@ LinkDrag/
 
 #### AI media summaries
 
-- Use the AI button beside a video or the toolbar's “Summarize page media”.
+- Use the AI button beside a video or the toolbar's “Summarize page media”. The button appears only while hovering a visible, playable main player; comment, notification, tiny-icon and hidden players are excluded.
 - Subtitles first; otherwise an independent audio stream; otherwise extract audio from video, run ASR, then send the transcript to a text model.
 - Native VTT/SRT, YouTube captions, Bilibili captions and audio streams are supported.
-- Multi-platform discovery: Douyin, Kuaishou, Bilibili, YouTube, TikTok, Xiaohongshu, Instagram and X/Twitter when the page exposes public media. It uses page declarations, JSON-LD, `og:video`/`og:audio` and platform CDN URLs; Kuaishou also has a GraphQL detail resolver, and Douyin uses a detail API plus page/network fallbacks.
-- On Douyin recommendation/featured feeds, LinkDrag rebinds the currently playing video after an in-place feed refresh and searches the latest network requests, player parent data, page data and detail API for the real media URL.
+- Multi-platform discovery: Douyin, Kuaishou, Bilibili, YouTube, TikTok, Xiaohongshu, Instagram and X/Twitter when the page exposes public media. It uses page declarations, JSON-LD, `og:video`/`og:audio` and platform CDN URLs; Kuaishou also has a GraphQL detail resolver; Douyin uses a detail API plus the clicked player's own MSE audio track as its fallback.
+- Douyin detail parsing prefers the dedicated audio-only DASH track. Clicking the AI button beside a Douyin share link on any other page resolves the video id and starts the audio summary directly, without opening the video page first.
+- Even when a summary was generated from subtitles, the summary window still offers “Download video” and “Download audio”; the media URLs are resolved on first click, and Douyin supplies the full MP4 plus the audio-only M4A.
+- Performance: Douyin/TikTok skip the meaningless subtitle wait, generic videos fall back to ASR after 3.5 seconds, long ASR uploads use two concurrent chunks, Douyin details are cached for 120 seconds, and merely passing over a link no longer prebuilds the full preview UI.
+- On Douyin recommendation/featured feeds, LinkDrag binds strictly to the clicked player: only a detail response, page record, or MSE audio track with the same `aweme_id` is accepted. Unbound CDN MP4s are never used as a fallback.
 - Media summary windows can download video, download audio, download SRT subtitles and copy the summary.
 - **SRT subtitles**: real subtitle cues keep their timestamps; plain ASR without timestamps receives a valid continuous estimated timeline based on media duration.
 - Player capture is a last-resort fallback only when no accessible direct URL exists; raw video is never sent to the AI model.
@@ -239,7 +247,7 @@ LinkDrag/
 
 #### Install from ZIP (development build)
 
-1. Download and extract `dist/LinkDrag-v1.1.7.zip`.
+1. Download and extract `dist/LinkDrag-v1.1.14.zip`.
 2. Open `edge://extensions` or `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the extracted `LinkDrag` folder.
@@ -334,7 +342,7 @@ powershell -ExecutionPolicy Bypass -File .\打包ZIP.ps1
 
 ### Version
 
-**v1.1.7** — first official LinkDrag release.
+**v1.1.14** — first official LinkDrag release.
 
 ---
 

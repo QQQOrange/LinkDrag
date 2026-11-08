@@ -219,3 +219,76 @@
 |---|---|---|
 | `renderTextAISummaryPanel` | 网页 AI 总结改用 `.summary-scroll` 内容区 + 独立操作栏；`.text-ai-answer` 取消内部最大高度/滚动 | 无头 Edge：内容区 padding `17px 21px 13px`，正文左边界 745、面板右边界 1166，正文不再贴边；正文 `overflow=visible`，内容区 `overflow-y=auto` |
 | `installLauncher.place` | 链接旁预览/AI 两个按钮都放在链接矩形外；优先左右，空间不足移到下方，禁止覆盖链接 | 24×24 图标链接实测：链接 `68–92px`，预览按钮 `96–118px`，AI 按钮 `42–64px`，两者与链接均无交叠 |
+
+## 十五、v1.1.8 抖音 AI 总结错绑其他视频
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| `selectMediaCandidate` / `scanMediaCandidates` | 抖音只接受与点击 `<video>` 完全相同的候选；网络请求、性能资源和页面声明里的未绑定 URL 全部标为 `unbound`，不再作为兜底 | 单元测试覆盖：有锚点时无精确候选返回 `null`，不会落到特效/相邻视频 |
+| `resolveDouyinMediaUrl` / `douyinPageDataUrls` | URL 必须带同一 `aweme_id`，页面数据必须在同 `aweme_id` 的对象内；移除未过滤的脚本 URL 扫描 | 静态断言 + 真实抖音页候选列表检查：候选含 blob、多个 unbound CDN，选中的始终是锚点 |
+| `requestDouyinDetail` / `douyin_hook` | 详情接口改为返回服务端实际 `detail.aweme_id`，不再回显请求 ID；内容脚本要求 ID 一致且时长匹配 | 回归测试断言 `awemeId: returnedId` |
+| `douyin_hook` MSE | `owner` 标记 MediaSource，`id` 标记单个 SourceBuffer；请求时优先只回传当前播放器的音频轨 | 真实抖音页：owner 1 的音频轨 4 片进入解码，时长 20.48s、峰值 0.965 |
+| `extractAudioFromMseChunks` | 分组键加入 mime，避免音频/视频分片混在一个 MP4 blob 中 | 修复前 `decodeAudioData` 失败；修复后真实视频成功生成 873,894 字符音频 data URL 并进入 ASR |
+| 兜底策略 | 详情与页面数据都无法证明归属时，改用该播放器的 MSE 音轨；仍失败则明确报错，不再选“最新 MP4” | 真实抖音 36 分钟视频：总结请求标题、URL、`aweme_id` 与点击的视频一致，不再出现 effectcdn/直播流 |
+
+## 十六、v1.1.9 拖拽作用域、原图与 AI 按钮范围
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| 顶层 `dragstart` / `hasUrlPayload` / `drop` | 识别选区拖拽和输入框内选区；选中文字拖动时只保留原生行为，不显示拖放层、不解析文字中的 URL、不开预览 | 单元测试 `selectionIntersectsElement`；静态断言拖放路径检查 `__LPS_TEXT_DRAG__` |
+| `installLinkDrag` | mousedown/mousemove/dragstart 均跳过与选区相交的链接，避免“选文字”被判定为拖链接 | 选区相交测试 + 全量回归 |
+| `imageInfoFromElement` | 扫描多层祖先和邻近节点的 `data-full`/`data-original`/`data-actualsrc` 等原图属性；保留指向查看页的父链接 | `srcset`/原图属性测试；真实缩略图结构检查 |
+| `imageOriginalVariants` / `imageUrlsFromHtml` | 支持 `-300x200`、`_thumb`、`/thumb/` 等缩略图变体；查看页抓取 `og:image`、`twitter:image`、`image_src`、preload 和 JSON-LD 图片 | 7 项新增测试通过，含 HTML 元数据顺序 |
+| `setupImageViewer` / `upgradeImageViewerFromPage` | 先显示可用缩略图，抓到查看页原图后自动把原图放到候选首位并重新加载 | 代码检查；候选合并逻辑通过 |
+| `isVideoSummaryEligible` / `showVideoAI` / `scanVisibleVideo` | 视频 AI 按钮只在悬停符合条件的真实播放器时显示；自动扫描不再展示按钮；评论区、通知、回复、表情、广告、隐藏/过小视频均排除；抖音要求 `feed-active-video`/`xgplayer` 等播放器容器 | 单元测试覆盖主播放器、评论视频、90×60 小视频；静态断言无自动 `showVideoAI(videos[0])` |
+| `installVideoSummary` 指针离开 | 不再依赖 `<video>` 的 `mouseout`（播放器常被控制层覆盖收不到），改为判断指针离开视频和按钮矩形后 700ms 收起 | 真实抖音页：未悬停无按钮；悬停主视频出现；移到页面空白或注入的评论视频后隐藏 |
+| 总结窗口 CSS | 停靠状态 `cursor:default`，仅 `data-summary-dock="free"` 时使用 `grab/grabbing` | 静态 CSS 断言通过 |
+
+## 十七、v1.1.10 抖音音轨绑定与 AI 按钮首次定位
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| `douyin_hook` 详情请求 | 签名函数抛错或详情请求被 Argus 拦截时，重试带 Cookie 的简化 detail 请求；不再把整个详情响应丢掉 | 真实短链 `https://v.douyin.com/70NAaFJGzWg/`：detail 返回 `ok:true`，同时拿到视频 URL 和音乐 URL |
+| `douyinAudioTracksForVideo` / `startMediaSummary` | 按当前视频 `currentSrc` 的 `l` 请求日志令牌绑定独立音频流；当前是 blob 时保留最近音频候选，但逐个解码并用视频时长校验，避免把 26 秒背景音乐当成 132 秒视频音轨 | 单元测试覆盖同 `l` 匹配、跨 `l` 拒绝；真实视频仍正确选择当前 aweme 的音轨 |
+| `extractAudioFromVideo` / `captureAudioFromMediaUrl` | 直接视频 URL 的字节解码失败时，用隐藏 `<audio>` 元素在本地按 4× 捕获音轨并转 WAV；不把原始视频发给模型 | 代码路径检查；直接 URL 与 MSE 路径仍有回退 |
+| `requestRemoteTranscript` / `offscreen.transcribeRemote` | 长视频（36 分钟）优先让 offscreen 直接下载独立音轨并按 5 分钟分段转写，避免把 52 MB 音频 data URL 塞进 runtime 消息；offscreen 以 16 kHz 解码以降低长音频内存 | 真实长视频：独立音轨 52,217,604 字节、解码时长 2158.55 秒；详情返回同一 aweme 的视频地址 |
+| `isVideoSummaryEligible` / `showVideoAI` | 抖音额外要求播放器面积达到视口 18%，排除头像/预览卡片；按钮创建时放在屏幕外，连续 3 帧矩形稳定后才定位显示 | 真实抖音页位置采样：首帧 `hidden`，稳定后才在右上角出现；小卡片测试为 false |
+| 回归测试 | 增加详情兜底、音频候选绑定、按钮稳定定位断言 | 全量 Node test：63/63 通过 |
+
+## 十八、v1.1.11 长视频音轨分包
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| `requestRemoteTranscript` / `offscreen.transcribeRemote` | 36 分钟视频改由 offscreen 直接下载独立音轨并每 5 分钟分段转写；长音频不经过超大 data URL 消息，16 kHz 解码降低内存 | 真实长视频详情返回同一 aweme 的视频地址；独立音轨 52,217,604 字节、解码时长 2158.55 秒 |
+
+## 十九、v1.1.12 抖音分享链与详情音轨
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| `awemeIdFromVideo` / `douyin_hook.lpsAwemeId` | 抖音详情页的播放器外层只有 `video_<aweme_id>` 类名，没有 `data-aweme-id`。现在同时解析该类名，优先于地址栏和历史 API ID | 真实视频页 `https://www.douyin.com/video/7674218868219799695`：不手动加属性也能拿到 `aweme_id`；回归测试覆盖 |
+| `startMediaSummary` | 内容脚本取不到 DOM ID 时，若详情接口返回的 `aweme_id` 与 `/video/{id}` 地址栏一致且时长匹配，则接受该详情；不再因为 `currentId` 为空而丢掉整个详情响应 | 真实视频页：总结从 `blob` 链路切换到 `音频链路 · direct · 464 秒` |
+| `douyin_hook.lpsExtractDetailUrls` / `background.collectDouyinApiAudioUrls` | 读取 `video.bit_rate_audio[].audio_meta.url_list`（对象形式 `main_url`/`backup_url`/`fallback_url`），把专用音频 DASH 轨放在 `music.play_url` 之前；背景音乐单独返回，不再冒充语音轨 | 真实详情：返回 3 条音频候选；单元测试断言 `main_url` 优先、背景音乐不进入音频候选 |
+| `background.resolveDouyinViaTab` | 先复用已打开的抖音标签页执行同源详情请求；没有时才创建 `active:false` 的临时标签页，解析完成后关闭。避免扩展源 fetch 因 `UIFID` SameSite=Lax 返回 403 | 真实短链 `https://v.douyin.com/qCFsqVKjLHM/`：后台返回 `ok:true`、`videoId=7674218868219799695`、3 条音频地址 |
+| `openQuickAISummary` / `openDouyinLinkSummary` | 在任意页面点击抖音分享链接的 AI 按钮时，识别 `v.douyin.com` / 视频页链接并走媒体总结；显示解析进度，失败时在总结窗口给出具体原因 | 本地测试页：短链直接生成 `音频链路 · direct · 464 秒` 总结，mock ASR/文本接口成功；全量 Node test 68/68 通过 |
+
+## 二十、v1.1.13 视频下载与字幕总结下载
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| `startMediaSummary` | 详情返回音频轨时，同时把 `detail.video[0]` 作为独立的视频下载候选；详情返回 ID 与当前 aweme 不一致时仍拒绝 | 真实抖音视频：MP4 下载成功，`20,486,650` 字节 |
+| `downloadMediaVideo` / `appendDouyinDetailCandidates` | 下载候选按“直链优先”排序，详情视频标记 `verifiedVideo`，跳过会把抖音 CDN 403 的隐藏 `<video>` 探测 | 真实抖音视频：直接下载详情 MP4，不再走 MSE 录制 |
+| `requestMediaDownload` | 页面内先 `fetch` 媒体并 Blob 保存，保留页面 Referer；失败后回退后台 `chrome.downloads`。后台去掉 Chromium 不接受的 `DownloadOptions.headers`，DNR 对 `other` 请求补 Referer | 真实抖音：MP4 与 M4A 均落盘；本地直链视频下载成功 |
+| `downloadMediaAudio` / 字幕总结面板 | 视频总结（含字幕总结）新增“下载视频”“下载音频”；点击时才调用 `ensureMediaForDownload` 解析候选，抖音会补详情音频轨和视频直链 | 字幕测试页：字幕总结面板出现两个下载按钮，视频下载 `17,707` 字节 |
+| `mediaSourceNote` | 详情解析后刷新面板媒体来源文字，不再显示过期的 `blob` 来源 | 代码路径 + 真实页面检查 |
+| `cleanDownloadName` | 文件扩展名从 URL 路径读取，支持 WebM/MOV/MKV/M4A/MP3 等，抖音 MP4 保持 `.mp4` | 本地 WebM 直链下载；抖音 MP4/M4A 文件名正确 |
+
+## 二十一、v1.1.14 全方位性能提速
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| `manifest.content_scripts` | 从 content_scripts 移除 `i18n.js`：内容脚本不读取 `LinkDragI18N`，只有 popup/options/sidepanel 需要它；每个网页 frame 少解析约 20 KB | `test/i18n_static.test.js` 断言 content_scripts 不再包含 i18n.js |
+| `subtitleProbeBudget` / `startVideoSummary` | 抖音/TikTok 不再等待无意义的 20 秒字幕探测；普通无字幕页面 3.5 秒后直接转 ASR，YouTube/B 站保留 12 秒 | 静态回归断言；无字幕路径不再存在 `resolve(null), 20000` |
+| `offscreen.transcribeRemote` | 5 分钟 ASR 分片最多 2 路并发，结果按原索引组装；失败仍返回具体分片号 | 分包顺序/并发静态断言；全量 Node test 76/76 通过 |
+| `requestDouyinDetail` | 详情结果缓存 120 秒，缓存键包含 aweme id、页面路径和当前播放器 blob，避免总结后下载重复请求 | 真实抖音：总结后下载不再等待详情接口 |
+| `scheduleShellWarm` / `cancelShellWarm` | 指针仅路过链接后在 idle 回调前离开时取消建壳，避免为不会打开的预览解析整张 UI | 代码路径检查；全量回归 |
+| `syncSummaryBackdrop` / 会话定时器 | 没有窗口时立即返回，降低常驻页面的无效遍历 | 静态断言 |
