@@ -18,6 +18,7 @@ test('manifest allows notifications and the background checks GitHub', () => {
   assert.match(bg, /Authorization = 'Bearer '/);
   assert.match(bg, /scheduleUpdateCheck\('startup'\)/);
   assert.match(bg, /releases\.atom/);
+  assert.match(bg, /compareVersions\(latestVersion, VERSION\)/);
 });
 
 test('update UI exposes a token field, manual check and release link', () => {

@@ -75,16 +75,19 @@ async function getSettings() {
 
 function normalizeUpdateConfig(value) {
   const raw = value && typeof value === 'object' ? value : {};
+  const latestVersion = String(raw.latestVersion || '').replace(/^v/i, '');
   return {
     enabled: raw.enabled !== false,
     token: String(raw.token || '').trim(),
     lastCheck: Number(raw.lastCheck) || 0,
-    latestVersion: String(raw.latestVersion || '').replace(/^v/i, ''),
+    latestVersion,
     latestName: String(raw.latestName || ''),
     releaseUrl: String(raw.releaseUrl || UPDATE_RELEASES_URL),
     publishedAt: String(raw.publishedAt || ''),
     lastError: String(raw.lastError || ''),
-    updateAvailable: raw.updateAvailable === true,
+    // Never trust the persisted flag: it can be stale after LinkDrag itself
+    // was updated.  Availability is always relative to the running version.
+    updateAvailable: !!latestVersion && compareVersions(latestVersion, VERSION) > 0,
     lastNotifiedAt: Number(raw.lastNotifiedAt) || 0,
     lastNotifiedVersion: String(raw.lastNotifiedVersion || '')
   };
@@ -125,27 +128,30 @@ async function readUpdateConfig() {
 }
 
 function publicUpdateStatus(config) {
+  const latestVersion = config.latestVersion || '';
   return {
     ok: true,
     enabled: config.enabled !== false,
     hasToken: !!config.token,
     currentVersion: VERSION,
-    latestVersion: config.latestVersion || '',
+    latestVersion,
     latestName: config.latestName || '',
     releaseUrl: config.releaseUrl || UPDATE_RELEASES_URL,
     publishedAt: config.publishedAt || '',
     lastCheck: config.lastCheck || 0,
     lastError: config.lastError || '',
-    updateAvailable: config.updateAvailable === true
+    updateAvailable: !!latestVersion && compareVersions(latestVersion, VERSION) > 0
   };
 }
 
 function openUpdateRelease() {
   return readUpdateConfig().then(config => {
-    const url = /^https:\/\/github\.com\/QQQOrange\/LinkDrag\/releases/i.test(config.releaseUrl)
-      ? config.releaseUrl
+    const candidate = String(config.releaseUrl || '');
+    const url = /^https:\/\/github\.com\/QQQOrange\/LinkDrag\/releases(?:\/|$)/i.test(candidate)
+      ? candidate
       : UPDATE_RELEASES_URL;
     try { chrome.tabs.create({ url }); } catch (e) { /* ignore */ }
+    return url;
   });
 }
 
@@ -253,6 +259,14 @@ async function checkForUpdate(force, manual) {
           if (!available) {
             next.lastNotifiedVersion = '';
             next.lastNotifiedAt = 0;
+            try {
+              if (chrome.notifications && chrome.notifications.clear) {
+                if (config.lastNotifiedVersion) {
+                  chrome.notifications.clear('linkdrag-update-' + config.lastNotifiedVersion);
+                }
+                if (latestVersion) chrome.notifications.clear('linkdrag-update-' + latestVersion);
+              }
+            } catch (e) { /* ignore */ }
           } else if (force || config.lastNotifiedVersion !== latestVersion || Date.now() - config.lastNotifiedAt > UPDATE_NOTIFY_COOLDOWN) {
             next.lastNotifiedVersion = latestVersion;
             next.lastNotifiedAt = Date.now();
@@ -1596,7 +1610,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (type === 'ldp:openUpdate') {
-    openUpdateRelease().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    openUpdateRelease().then(url => sendResponse({ ok: true, url }), () => sendResponse({ ok: false }));
     return true;
   }
 

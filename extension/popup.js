@@ -206,19 +206,30 @@ async function loadHistory() {
   }
 }
 
+function isNewerVersion(latest, current) {
+  const parts = value => String(value || '').replace(/^v/i, '').split('.').map(x => Number((String(x).match(/^\d+/) || [0])[0]) || 0);
+  const a = parts(latest), b = parts(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  }
+  return false;
+}
+
 async function loadUpdateBanner() {
   if (!ui.updateBanner) return;
   const status = await sendBackground({ type: 'ldp:getUpdateStatus' });
-  if (!status || !status.ok || !status.updateAvailable || !status.latestVersion) {
+  const current = chrome.runtime.getManifest().version;
+  const latest = String((status && status.latestVersion) || '');
+  if (!status || !status.ok || !latest || !isNewerVersion(latest, current)) {
     ui.updateBanner.hidden = true;
     return;
   }
-  ui.updateVersion.textContent = `v${status.latestVersion}（当前 v${status.currentVersion}）`;
+  const releaseUrl = /^https:\/\/github\.com\/QQQOrange\/LinkDrag\/releases(?:\/|$)/i.test(String(status.releaseUrl || ''))
+    ? status.releaseUrl
+    : 'https://github.com/QQQOrange/LinkDrag/releases';
+  ui.updateVersion.textContent = `v${latest}（当前 v${current}）`;
+  ui.openUpdate.dataset.url = releaseUrl;
   ui.updateBanner.hidden = false;
-  ui.openUpdate.onclick = async () => {
-    await sendBackground({ type: 'ldp:openUpdate' });
-    window.close();
-  };
 }
 
 async function ensureAndReadStatus() {
@@ -262,6 +273,20 @@ async function init() {
   ui.updateBanner = $('updateBanner');
   ui.updateVersion = $('updateVersion');
   ui.openUpdate = $('openUpdate');
+  ui.openUpdate.addEventListener('click', () => {
+    const url = ui.openUpdate.dataset.url || 'https://github.com/QQQOrange/LinkDrag/releases';
+    try {
+      chrome.tabs.create({ url }, () => {
+        if (chrome.runtime.lastError) {
+          try { window.open(url, '_blank', 'noopener'); } catch (e) { /* ignore */ }
+        }
+        window.close();
+      });
+    } catch (e) {
+      try { window.open(url, '_blank', 'noopener'); } catch (e2) { /* ignore */ }
+      window.close();
+    }
+  });
 
   ui.version.textContent = 'v' + chrome.runtime.getManifest().version;
   ui.footerOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());

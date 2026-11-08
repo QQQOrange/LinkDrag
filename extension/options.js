@@ -92,6 +92,15 @@ async function parseAtomRelease() {
   };
 }
 
+function isNewerVersion(latest, current) {
+  const parts = value => String(value).replace(/^v/i, '').split('.').map(x => Number((String(x).match(/^\d+/) || [0])[0]) || 0);
+  const a = parts(latest), b = parts(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  }
+  return false;
+}
+
 async function directUpdateCheck() {
   const token = $('updateToken').dataset.clear === '1' ? '' : $('updateToken').value.trim();
   const headers = {
@@ -125,12 +134,7 @@ async function directUpdateCheck() {
   }
   const latest = String(release.tag || '').replace(/^v/i, '').trim();
   if (!latest) throw new Error('GitHub 没有返回版本号');
-  const parts = value => String(value).replace(/^v/i, '').split('.').map(x => Number((String(x).match(/^\d+/) || [0])[0]) || 0);
-  const a = parts(latest), b = parts(chrome.runtime.getManifest().version);
-  let newer = false;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if ((a[i] || 0) !== (b[i] || 0)) { newer = (a[i] || 0) > (b[i] || 0); break; }
-  }
+    const newer = isNewerVersion(latest, chrome.runtime.getManifest().version);
   return {
     latestVersion: latest,
     latestName: release.name || release.tag,
@@ -147,7 +151,8 @@ function renderUpdateStatus(config, fallback) {
   const c = config || {};
   const current = chrome.runtime.getManifest().version;
   const latest = String(c.latestVersion || '');
-  if (c.updateAvailable && latest) {
+  const hasNewer = !!latest && isNewerVersion(latest, current);
+  if (hasNewer) {
     node.className = 'update-status good';
     node.textContent = tr(`发现新版本 v${latest}（当前 v${current}）`, `New version v${latest} (current v${current})`);
     if (open) {
@@ -212,7 +217,8 @@ async function checkUpdateNow() {
       await storageSet({ [UPDATE_CONFIG_KEY]: saved });
       $('updateToken').dataset.clear = '';
       renderUpdateStatus(saved);
-      setState('updateState', saved.updateAvailable
+      const savedNewer = isNewerVersion(saved.latestVersion, chrome.runtime.getManifest().version);
+      setState('updateState', savedNewer
         ? tr('发现新版本；点击「打开 GitHub 发布页」自行下载。', 'A new version is available. Open the GitHub release page to download it.')
         : tr('当前已是最新版本。', 'You are up to date.'), 'good');
       return;
@@ -229,7 +235,8 @@ async function checkUpdateNow() {
     setState('updateState', config.lastError, 'bad');
     return;
   }
-  setState('updateState', config.updateAvailable
+  const configNewer = isNewerVersion(config.latestVersion, chrome.runtime.getManifest().version);
+  setState('updateState', configNewer
     ? tr('发现新版本；点击「打开 GitHub 发布页」自行下载。', 'A new version is available. Open the GitHub release page to download it.')
     : tr('当前已是最新版本。', 'You are up to date.'), 'good');
 }
@@ -593,7 +600,15 @@ async function load() {
   $('updateToken').addEventListener('input', () => { $('updateToken').dataset.clear = ''; });
   $('openUpdate').addEventListener('click', () => {
     const url = $('openUpdate').dataset.url || 'https://github.com/QQQOrange/LinkDrag/releases';
-    chrome.tabs.create({ url });
+    try {
+      chrome.tabs.create({ url }, () => {
+        if (chrome.runtime.lastError) {
+          try { window.open(url, '_blank', 'noopener'); } catch (e) { /* ignore */ }
+        }
+      });
+    } catch (e) {
+      try { window.open(url, '_blank', 'noopener'); } catch (e2) { /* ignore */ }
+    }
   });
 
   $('language').addEventListener('change', () => {
