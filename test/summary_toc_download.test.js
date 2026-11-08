@@ -27,12 +27,13 @@ function extract(name) {
 test('summary TOC is built from headings and stays collapsed by default', () => {
   assert.match(source, /function bindSummaryToc/);
   assert.match(source, /const TOC_MIN_HEADINGS = 2/);
-  assert.match(source, /list\.hidden = true/);
+  assert.match(source, /list\.hidden = !open/);
   assert.match(source, /toggle\.addEventListener\('click'/);
   // Jumps go through scrollIntoView; offsetTop alone is relative to the
   // positioned answer card and used to land in the wrong place.
   assert.match(source, /function jumpToHeading/);
-  assert.match(source, /heading\.scrollIntoView\(\{ block: 'start'/);
+  assert.match(source, /scroller\.scrollTo\(\{ top: target, behavior: 'smooth' \}\)/);
+  assert.match(source, /scroller\.scrollTop = target/);
   assert.match(source, /jumpToHeading\(root, node\)/);
 });
 
@@ -101,4 +102,30 @@ test('follow-up text follows the summary font size control', () => {
   assert.match(source, /\.followup-text\{[^}]*font-size:var\(--summary-font-size,14px\)/);
   assert.match(source, /\.followup-input\{[^}]*font-size:var\(--summary-font-size,14px\)/);
   assert.match(source, /function summaryFontSizeValue/);
+});
+
+
+test('outline outside-click does not close on its own items inside a closed shadow root', () => {
+  // Regression: a document-level pointerdown listener sees only the retargeted
+  // host for events inside the closed shadow root, so clicking an outline entry
+  // was treated as "outside" and closed the list on pointerdown — the entry
+  // vanished before mouseup, so no click and no jump ever happened.
+  assert.match(source, /const closeIfOutside = event =>/);
+  assert.match(source, /const rootNode = \(\(\) => \{ try \{ return wrap\.getRootNode\(\); \}/);
+  assert.match(source, /rootNode\.addEventListener\('pointerdown', closeIfOutside, true\)/);
+  assert.match(source, /if \(host && \(target === host \|\| \(host\.contains && host\.contains\(target\)\)\)\) return;/);
+});
+
+test('summary panel rebuilds do not accumulate outline or composer nodes', () => {
+  assert.match(source, /panel\.querySelectorAll\('\.summary-toc'\)\.forEach\(node => node\.remove\(\)\)/);
+  assert.match(source, /panel\.querySelectorAll\('\.followup-box'\)\.forEach\(node => node\.remove\(\)\)/);
+  assert.match(source, /item\._tocScrollTarget = root/);
+});
+
+test('the composer keeps drafts and focus across a re-render', () => {
+  assert.match(source, /item\.followupDraft = input\.value/);
+  assert.match(source, /input\.value = String\(item\.followupDraft \|\| ''\)/);
+  assert.match(source, /item\.followupFocusWanted = true/);
+  assert.match(source, /compositionend/);
+  assert.doesNotMatch(source, /ui\.followupInput\.disabled = !!busy/);
 });

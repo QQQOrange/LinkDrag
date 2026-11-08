@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.1.17
+/* LinkDrag — Chromium extension v1.1.18
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.1.17 and writes extension/content.js.
+ * manifest version into 1.1.18 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.1.17'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.1.17', name: '' }; }
+      return { version: String(m.version || '1.1.18'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.1.18', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -345,7 +345,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.1.17';
+    return '1.1.18';
   })();
 
   const TOP = window.self === window.top;
@@ -4477,6 +4477,17 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const panel = item.ui.panel;
     panel.classList.remove('settings-panel');
     panel.classList.remove('ai-panel');
+    // The panel is rebuilt on every render (including each streaming tick).
+    // Drop the previous outline/listeners first: leftover TOC nodes used to
+    // stack on top of the new answer and swallow clicks meant for it.
+    if (item._tocScroll) {
+      try { item._tocScrollTarget && item._tocScrollTarget.removeEventListener('scroll', item._tocScroll); } catch (e) { /* ignore */ }
+      item._tocScroll = null;
+      item._tocScrollTarget = null;
+    }
+    try {
+      panel.querySelectorAll('.summary-toc').forEach(node => node.remove());
+    } catch (e) { /* ignore */ }
     panel.textContent = '';
     const head = el('div', 'panel-head');
     const close = el('button', 'btn panel-close');
@@ -13900,39 +13911,47 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
    * scroller) — that mismatch is why TOC clicks appeared to do nothing.
    */
   function jumpToHeading(scroller, heading) {
-    if (!scroller || !heading) return false;
-    let before = -1;
-    try { before = scroller.scrollTop; } catch (e) { /* ignore */ }
-    try {
-      heading.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' });
-    } catch (e) {
-      try { heading.scrollIntoView(true); } catch (e2) { /* ignore */ }
-    }
-    // Fallback for engines where scrollIntoView picks the wrong ancestor:
-    // compute the offset in the scroller's coordinate space and scroll manually.
-    try {
-      const scRect = scroller.getBoundingClientRect();
-      const hRect = heading.getBoundingClientRect();
-      const delta = hRect.top - scRect.top;
-      if (Math.abs(delta) > 24) {
-        const target = Math.max(0, scroller.scrollTop + delta - 4);
-        try { scroller.scrollTo({ top: target, behavior: 'smooth' }); }
-        catch (e) { scroller.scrollTop = target; }
-      }
-    } catch (e) { /* ignore */ }
-    // Re-assert the active chapter immediately so the sticky heading follows
-    // the click even before the smooth scroll finishes.
-    try {
-      const headings = Array.from(scroller.querySelectorAll('h1,h2,h3,h4'));
-      const index = headings.indexOf(heading);
-      if (index >= 0) {
+    if (!scroller || !heading || !scroller.isConnected || !heading.isConnected) return false;
+    const applyActive = () => {
+      try {
+        const headings = Array.from(scroller.querySelectorAll('h1,h2,h3,h4'));
+        const index = headings.indexOf(heading);
+        if (index < 0) return;
         headings.forEach((h, i) => {
           h.classList.toggle('toc-sticky', i === index);
           h.classList.toggle('toc-passed', i < index);
         });
+      } catch (e) { /* ignore */ }
+    };
+    // Compute the destination in the scroller's own coordinate space.  Smooth
+    // scrollTo is used first because it is what users expect; a hard jump
+    // follows if the smooth animation was suppressed (reduced-motion, hidden
+    // tab, or an ancestor clipping the scroll).
+    let target = null;
+    try {
+      const scRect = scroller.getBoundingClientRect();
+      const hRect = heading.getBoundingClientRect();
+      target = Math.max(0, scroller.scrollTop + (hRect.top - scRect.top) - 4);
+    } catch (e) { target = null; }
+    if (target === null) return false;
+    try { scroller.scrollTo({ top: target, behavior: 'smooth' }); }
+    catch (e) { try { scroller.scrollTop = target; } catch (e2) { /* ignore */ } }
+    applyActive();
+    // Verify and, if needed, force the position synchronously.  Without this a
+    // clip/overflow ancestor can swallow the animated scroll entirely and the
+    // click appears to do nothing.
+    let tries = 0;
+    const settle = () => {
+      tries += 1;
+      if (!scroller.isConnected || !heading.isConnected) return;
+      const moved = Math.abs(scroller.scrollTop - target) <= 8;
+      if (!moved && tries <= 6) { requestAnimationFrame(settle); return; }
+      if (!moved) {
+        try { scroller.scrollTop = target; } catch (e) { /* ignore */ }
       }
-      if (before >= 0) scroller.dataset.lastJump = String(before);
-    } catch (e) { /* ignore */ }
+      applyActive();
+    };
+    requestAnimationFrame(settle);
     return true;
   }
 
@@ -13943,7 +13962,11 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     const existing = panel && panel.querySelector('.summary-toc');
     if (headings.length < TOC_MIN_HEADINGS) {
       if (existing) existing.remove();
-      if (item._tocScroll) { try { root.removeEventListener('scroll', item._tocScroll); } catch (e) { /* ignore */ } item._tocScroll = null; }
+      if (item._tocScroll) {
+        try { (item._tocScrollTarget || root).removeEventListener('scroll', item._tocScroll); } catch (e) { /* ignore */ }
+        item._tocScroll = null;
+        item._tocScrollTarget = null;
+      }
       return;
     }
     const idPrefix = 'ldp-toc-' + (item.id || Math.random().toString(36).slice(2));
@@ -13978,13 +14001,34 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
         wrap.classList.toggle('open', open);
       });
-      // 点外面收起，避免挡住总结正文
-      document.addEventListener('pointerdown', event => {
+      // 点外面收起，避免挡住总结正文。
+      // ⚠ 不能只挂在 document 上：总结 UI 在 closed shadow root 里，
+      // document 层拿到的是被重定向过的 composedPath（只剩 host），
+      // 于是「点目录项自己」会被误判成「点外面」——列表在 pointerdown
+      // 瞬间就被隐藏，元素随之消失，mouseup/click 都收不到，
+      // 表现就是「点目录没有任何反应」。
+      // 正确做法：在 shadow root 内部再挂一个监听，用真实的内部路径判断。
+      const closeIfOutside = event => {
         if (!wrap.isConnected || list.hidden) return;
         const path = event.composedPath ? event.composedPath() : [];
         if (path.includes(wrap)) return;
         list.hidden = true;
         wrap.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+      };
+      const rootNode = (() => { try { return wrap.getRootNode(); } catch (e) { return document; } })();
+      if (rootNode && rootNode !== document && rootNode.addEventListener) {
+        // Inside the same shadow tree events are not retargeted, so this sees
+        // the real target and can tell "inside the outline" from "outside".
+        rootNode.addEventListener('pointerdown', closeIfOutside, true);
+      }
+      document.addEventListener('pointerdown', event => {
+        // Events originating inside our closed shadow root are retargeted to the
+        // host; treat those as "inside" so the root-level listener decides.
+        const target = event.target;
+        const host = rootNode && rootNode.host ? rootNode.host : null;
+        if (host && (target === host || (host.contains && host.contains(target)))) return;
+        closeIfOutside(event);
       }, true);
     }
     const list = nav.querySelector('.summary-toc-list');
@@ -14008,7 +14052,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     });
 
     // 当前章节高亮 + 吸顶标题
-    if (item._tocScroll) { try { root.removeEventListener('scroll', item._tocScroll); } catch (e) { /* ignore */ } }
+    if (item._tocScroll) {
+      try { (item._tocScrollTarget || root).removeEventListener('scroll', item._tocScroll); } catch (e) { /* ignore */ }
+      item._tocScrollTarget = null;
+    }
     let raf = 0;
     const sync = () => {
       raf = 0;
@@ -14029,6 +14076,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       });
     };
     item._tocScroll = () => { if (!raf) raf = requestAnimationFrame(sync); };
+    item._tocScrollTarget = root;
     root.addEventListener('scroll', item._tocScroll, { passive: true });
     sync();
   }
@@ -14093,7 +14141,8 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     if (!ui || !ui.followupSend) return;
     ui.followupSend.disabled = !!busy;
     ui.followupSend.textContent = busy ? '回答中…' : '追问';
-    if (ui.followupInput) ui.followupInput.disabled = !!busy;
+    // Never disable the field itself: voice input / IME composition can be in
+    // progress, and a disabled element silently drops every character.
   }
 
   function appendFollowupTurn(item, role, text) {
@@ -14178,6 +14227,13 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
 
   function buildFollowupBox(item) {
+    // A previous render's composer may still be attached (panel rebuilds happen
+    // on every streaming tick).  Remove it first so ids stay unique and clicks
+    // cannot land on a detached twin.
+    try {
+      const panel = item.ui && item.ui.panel;
+      if (panel) panel.querySelectorAll('.followup-box').forEach(node => node.remove());
+    } catch (e) { /* ignore */ }
     const wrap = el('div', 'followup-box');
     const head = el('div', 'followup-head');
     const title = el('span', 'followup-title', '继续追问');
@@ -14199,13 +14255,38 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (!value) { input.focus(); return; }
       input.value = '';
       input.style.height = '';
+      item.followupDraft = '';
       askFollowup(item, value);
     };
     send.addEventListener('click', submit);
-    input.addEventListener('input', () => {
+    // Keep a draft on the item.  Voice input and IME composition can commit
+    // hundreds of ms after the field was focused; if the panel re-renders in
+    // between, the new textarea is empty and the text looked "lost".
+    input.value = String(item.followupDraft || '');
+    const saveDraft = () => {
+      item.followupDraft = input.value;
+      item.followupFocusWanted = true;
       input.style.height = 'auto';
-      input.style.height = Math.min(96, Math.max(30, input.scrollHeight)) + 'px';
+      input.style.height = Math.min(108, Math.max(30, input.scrollHeight)) + 'px';
+    };
+    input.addEventListener('focus', () => { item.followupFocusWanted = true; });
+    input.addEventListener('blur', () => {
+      // A re-render removes the node without a real blur; only a genuine
+      // blur (focus moved elsewhere) should clear the intent.
+      setTimeout(() => {
+        if (!input.isConnected) return;   // rebuilt, keep the intent
+        if (document.activeElement !== input) item.followupFocusWanted = false;
+      }, 0);
     });
+    input.addEventListener('input', saveDraft);
+    input.addEventListener('compositionend', saveDraft);
+    // `beforeinput` fires first for IME/voice insertion; sync afterwards in case
+    // the platform only delivers that event.
+    input.addEventListener('beforeinput', () => { setTimeout(saveDraft, 0); });
+    input.addEventListener('paste', () => { setTimeout(saveDraft, 0); });
+    input.addEventListener('drop', () => { setTimeout(saveDraft, 0); });
+    input.addEventListener('change', saveDraft);
+    if (input.value) saveDraft();
     input.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
@@ -14224,6 +14305,23 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     // Match the current summary size immediately instead of waiting for the
     // next A± click.
     try { applySummaryTextStyle(item); } catch (e) { /* ignore */ }
+    // If the user was typing (very likely with voice input, which commits text
+    // into a focused field), carry the focus and caret over to the rebuilt
+    // textarea.  Losing focus mid-dictation made voice input look dead.
+    if (item.followupFocusWanted) {
+      setTimeout(() => {
+        try {
+          if (item.closed || !input.isConnected) return;
+          const active = document.activeElement;
+          const hostActive = active === wrap.closest('[data-ldp-host]') || active === (item.ui && item.ui.win);
+          if (hostActive || !active || item.followupFocusWanted) {
+            input.focus({ preventScroll: true });
+            const end = input.value.length;
+            try { input.setSelectionRange(end, end); } catch (e) { /* ignore */ }
+          }
+        } catch (e) { /* ignore */ }
+      }, 0);
+    }
     return wrap;
   }
 
