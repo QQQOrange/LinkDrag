@@ -1209,6 +1209,77 @@ async function resolveBilibiliAudio(input) {
   }
 }
 
+// Bilibili's DASH streams are separate video/audio `.m4s` files; a browser
+// cannot save them as one playable MP4 without remuxing.  The `platform=html5`
+// progressive endpoint returns a single muxed MP4 (`durl`), which is exactly
+// what "download video" should save.  Quality is capped by the account level,
+// which is why it is asked with the highest commonly allowed qn.
+async function resolveBilibiliVideo(input) {
+  const source = String(input || '');
+  const match = source.match(/\/video\/(BV[0-9A-Za-z]+)/i) || source.match(/\b(BV[0-9A-Za-z]+)\b/);
+  if (!match) return { ok: false, reason: 'invalid-url' };
+  const bvid = match[1];
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/156.0 Safari/537.36',
+    'Referer': 'https://www.bilibili.com/',
+    'Accept': 'application/json, text/plain, */*'
+  };
+  let pageNo = 1;
+  try { pageNo = Math.max(1, Number(new URL(source, 'https://www.bilibili.com').searchParams.get('p')) || 1); } catch (e) { pageNo = 1; }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const viewRes = await fetch('https://api.bilibili.com/x/web-interface/view?bvid=' + encodeURIComponent(bvid), {
+      headers, credentials: 'include', signal: controller.signal
+    });
+    const view = await viewRes.json();
+    const data = view && view.data;
+    if (!data) return { ok: false, reason: 'no-video', detail: view && view.message ? String(view.message) : 'B 站视频信息接口没有返回 data' };
+    const pages = Array.isArray(data.pages) ? data.pages : [];
+    const page = pages[pageNo - 1] || pages[0] || null;
+    const cid = (page && page.cid) || data.cid;
+    if (!cid) return { ok: false, reason: 'no-cid' };
+    const queries = [
+      'platform=html5&high_quality=1&fnval=1&fnver=0&fourk=1&qn=116&bvid=' + encodeURIComponent(bvid) + '&cid=' + encodeURIComponent(cid),
+      'platform=html5&high_quality=1&fnval=0&fnver=0&fourk=1&qn=80&bvid=' + encodeURIComponent(bvid) + '&cid=' + encodeURIComponent(cid)
+    ];
+    for (const query of queries) {
+      let play = null;
+      try {
+        const playRes = await fetch('https://api.bilibili.com/x/player/playurl?' + query, {
+          headers, credentials: 'include', signal: controller.signal
+        });
+        play = await playRes.json();
+      } catch (e) { continue; }
+      const list = play && play.data && Array.isArray(play.data.durl) ? play.data.durl : [];
+      const entry = list.find(item => item && /^https?:\/\//i.test(String(item.url || '')));
+      if (!entry) continue;
+      const url = String(entry.url).replace(/\\u002F/gi, '/');
+      const size = Number(entry.size) || 0;
+      const duration = Number(entry.length) ? Number(entry.length) / 1000 : (Number(page && page.duration) || Number(data.duration) || 0);
+      return {
+        ok: true,
+        url,
+        urls: list.map(item => String(item && item.url || '')).filter(Boolean),
+        quality: Number(play.data.quality) || 0,
+        acceptQuality: Array.isArray(play.data.accept_quality) ? play.data.accept_quality : [],
+        size,
+        duration,
+        title: String(data.title || '').trim(),
+        bvid,
+        cid,
+        part: String(page && page.part || '').trim(),
+        pages: pages.length
+      };
+    }
+    return { ok: false, reason: 'no-media', detail: 'B 站没有返回渐进式 MP4（可能需要登录或该视频仅提供 DASH 流）' };
+  } catch (e) {
+    return { ok: false, reason: e && e.name === 'AbortError' ? 'timeout' : 'network', detail: e && e.message ? String(e.message).slice(0, 160) : '' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function mediaSummary(request) {
   if (request && request.payloadKey) {
     const payloadKey = String(request.payloadKey);
@@ -1824,6 +1895,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (type === 'ldp:resolveBilibili') {
     resolveBilibiliAudio(message.url).then(sendResponse, () => sendResponse({ ok: false, reason: 'network' }));
+    return true;
+  }
+
+  if (type === 'ldp:resolveBilibiliVideo') {
+    resolveBilibiliVideo(message.url).then(sendResponse, () => sendResponse({ ok: false, reason: 'network' }));
     return true;
   }
 

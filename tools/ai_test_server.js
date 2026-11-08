@@ -23,7 +23,18 @@ const server = http.createServer((req, res) => {
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive'
       });
-      const parts = ['**MOCK_AI_OK**\n\n', '- 第一项\n', '- 第二项\n', '\n`code` 和 [链接](https://example.com)。'];
+      const parts = [
+        '**MOCK_AI_OK**\n\n',
+        '| 指标 | 数值 | 说明 |\n',
+        '|:---|---:|:--:|\n',
+        '| 时长 | 12:30 | 中 |\n',
+        '| 大小 | 42MB | 右 |\n\n',
+        '- 第一项\n',
+        '- [x] 已完成任务\n',
+        '- [ ] 未完成任务\n\n',
+        '![示意图](https://example.com/demo.png)\n\n',
+        '`code` 和 [链接](https://example.com)。'
+      ];
       let i = 0;
       const timer = setInterval(() => {
         if (i >= parts.length) {
@@ -43,7 +54,7 @@ const server = http.createServer((req, res) => {
       choices: [{
         message: {
           role: 'assistant',
-          content: 'MOCK_AI_OK\n\n这是测试接口返回的摘要。'
+          content: 'MOCK_AI_OK\n\n| 指标 | 数值 |\n|:---|---:|\n| 时长 | 12:30 |\n\n这是测试接口返回的摘要。'
         }
       }]
     }));

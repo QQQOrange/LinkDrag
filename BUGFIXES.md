@@ -292,3 +292,15 @@
 | `requestDouyinDetail` | 详情结果缓存 120 秒，缓存键包含 aweme id、页面路径和当前播放器 blob，避免总结后下载重复请求 | 真实抖音：总结后下载不再等待详情接口 |
 | `scheduleShellWarm` / `cancelShellWarm` | 指针仅路过链接后在 idle 回调前离开时取消建壳，避免为不会打开的预览解析整张 UI | 代码路径检查；全量回归 |
 | `syncSummaryBackdrop` / 会话定时器 | 没有窗口时立即返回，降低常驻页面的无效遍历 | 静态断言 |
+
+## 二十二、v1.1.15 B 站下载、抖音绑定与 Markdown 表格
+
+| 位置 | 改动 | 验证 |
+|---|---|---|
+| `background.resolveBilibiliVideo` / `ldp:resolveBilibiliVideo` | 新增 `platform=html5&high_quality=1` 渐进式接口解析，返回单文件 MP4（`durl`），包含 title/size/duration/quality | 真实 B 站视频 `BV1GJ411x7h7`：返回 51,973,319 字节、213 秒、quality=64 |
+| `downloadBilibiliVideo` / `downloadBilibiliAudio` / `startMediaSummary` | B 站点「下载视频」直接走渐进式 MP4；音视频解析并行；MP4 候选标 `downloadOnly`，`selectMediaCandidate` 排除它 | 真实点击：文件落盘 51,973,319 字节，MP4 头 `ftypisom/avc1/moov` 校验通过 |
+| `requestDouyinDetail` / `lpsAwemeId` | 详情请求始终传显式 `aweme_id`；返回 id 不一致直接丢弃；缓存键加入显式 id；hook 优先用显式 id | 真实抖音页：明确 id 请求 328ms 返回同一 aweme（3 音频 / 57 视频） |
+| `startMediaSummary`（抖音） | 总结结果绑定当前视频标题与时长（464 秒），来源为 `音频链路 · direct` | 真实页面总结：`当前视频：为什么总是想要逃避…`，与点击视频一致 |
+| `markdownToHtml` | 新增表格、图片、任务列表、删除线；图片仅接受 http(s)/data:image，链接与图片不再互相破坏 | 单元测试：表格对齐、图片、任务列表、`javascript:` 拒绝 |
+| `CSS` | `.md-table-wrap` 横向滚动 + 表头吸顶 + 斑马纹；`.markdown img` 自适应；任务列表与删除线样式 | 关闭 shadow root 实测：table `overflow-x:auto`、th `position:sticky`、task `line-through` |
+| `test/security_static.test.js` | 生成物比对前统一 CRLF→LF，并断言产物必须是 LF | 全量 Node test 81/81 通过 |

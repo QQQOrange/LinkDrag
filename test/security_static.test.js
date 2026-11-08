@@ -15,8 +15,13 @@ const source = read('src/extension.content.js');
 const built = read('extension/content.js');
 
 test('generated content is in sync with the canonical source and manifest version', () => {
-  assert.equal(built, source.replaceAll('__LPS_VERSION__', manifest.version));
+  // The extension artifact must be written with LF.  Comparing raw text made
+  // the test fail whenever a Windows editor saved the canonical source with
+  // CRLF, even though the built file was correct.
+  const normalize = value => String(value || '').replace(/\r\n/g, '\n');
+  assert.equal(normalize(built), normalize(source.replaceAll('__LPS_VERSION__', manifest.version)));
   assert.ok(!built.includes('__LPS_VERSION__'));
+  assert.ok(!built.includes('\r\n'), 'extension/content.js must use LF line endings');
   assert.match(built, new RegExp('v' + manifest.version.replaceAll('.', '\\.')));
 });
 

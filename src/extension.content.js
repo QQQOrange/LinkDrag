@@ -1911,6 +1911,20 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .ai-answer.markdown pre code{padding:0;background:transparent;font-size:11.5px;white-space:pre}
 .ai-answer.markdown a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
 .ai-answer.markdown hr{border:0;border-top:1px solid var(--border);margin:1em 0}
+/* Markdown tables and images inside summary/answer surfaces. */
+.md-table-wrap{max-width:100%;margin:.75em 0;overflow-x:auto;overscroll-behavior-x:contain;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 46%,transparent);-webkit-overflow-scrolling:touch}
+.md-table-wrap table{border-collapse:collapse;width:100%;font-size:.94em;line-height:1.55}
+.md-table-wrap th,.md-table-wrap td{padding:7px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent);text-align:left;vertical-align:top;word-break:break-word}
+.md-table-wrap th{position:sticky;top:0;background:color-mix(in srgb,var(--accent) 9%,var(--surface));font-weight:650;white-space:nowrap}
+.md-table-wrap tbody tr:last-child td{border-bottom:0}
+.md-table-wrap tbody tr:nth-child(even){background:color-mix(in srgb,var(--text) 3%,transparent)}
+.md-table-wrap code{padding:0 3px;font-size:.92em}
+.markdown img{max-width:100%;height:auto;display:block;margin:.7em auto;border-radius:10px;border:1px solid color-mix(in srgb,var(--border) 50%,transparent);background:var(--bg)}
+.markdown ul.md-tasks{padding-left:1.1em;list-style:none}
+.markdown li.md-task{display:flex;align-items:flex-start;gap:6px}
+.markdown li.md-task input{margin:.35em 0 0;flex:0 0 auto;accent-color:var(--accent)}
+.markdown li.md-task-done{color:var(--muted);text-decoration:line-through}
+.markdown del{color:var(--muted)}
 .ai-prompt-box{margin:2px 0 8px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--border) 48%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 38%,transparent)}
 .ai-prompt-head{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:4px;min-height:16px}
 .ai-prompt-label{font-size:11px;font-weight:650;color:var(--text);flex:0 0 auto}
@@ -6469,14 +6483,26 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function markdownToHtml(source) {
     const esc = value => String(value == null ? '' : value)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const safeHref = href => {
+      const value = String(href || '').trim();
+      return /^(https?:\/\/|mailto:)/i.test(value) ? esc(value) : '';
+    };
     const inline = text => {
       let value = esc(text);
       value = value.replace(/`([^`]+)`/g, (_, code) => '<code>' + code + '</code>');
+      // Images must be handled before links, otherwise `![alt](src)` becomes a
+      // broken nested anchor.  Only http(s)/data-image sources are accepted.
+      value = value.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (match, alt, src, title) => {
+        const href = safeHref(src) || (/^data:image\//i.test(src) ? esc(src) : '');
+        if (!href) return esc(alt || '');
+        return '<img src="' + href + '" alt="' + alt + '"' + (title ? ' title="' + title + '"' : '') + ' loading="lazy" decoding="async">';
+      });
+      value = value.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, (_, label, href) =>
+        '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
       value = value.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       value = value.replace(/__([^_]+)__/g, '<strong>$1</strong>');
       value = value.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-      value = value.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, (_, label, href) =>
-        '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
+      value = value.replace(/~~([^~]+)~~/g, '<del>$1</del>');
       return value;
     };
     const lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
@@ -6501,6 +6527,42 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       code = null;
       codeLang = '';
     };
+    const splitRow = line => String(line || '')
+      .trim()
+      .replace(/^\|/, '').replace(/\|$/, '')
+      .split('|')
+      .map(cell => cell.trim());
+    const alignOf = line => splitRow(line).map(cell => {
+      const left = /^:/.test(cell);
+      const right = /:$/.test(cell);
+      if (left && right) return 'center';
+      if (right) return 'right';
+      if (left) return 'left';
+      return '';
+    });
+    const isTableDivider = line => /\|/.test(String(line || ''))
+      && splitRow(line).every(cell => /^:?-{2,}:?$/.test(cell));
+    const renderTable = (headerLine, dividerLine, bodyLines) => {
+      const aligns = alignOf(dividerLine);
+      const head = splitRow(headerLine);
+      const alignAttr = index => {
+        const value = aligns[index] || '';
+        return value ? ' style="text-align:' + value + '"' : '';
+      };
+      const parts = ['<div class="md-table-wrap"><table><thead><tr>'];
+      head.forEach((cell, index) => { parts.push('<th' + alignAttr(index) + '>' + inline(cell) + '</th>'); });
+      parts.push('</tr></thead><tbody>');
+      for (const row of bodyLines) {
+        const cells = splitRow(row);
+        parts.push('<tr>');
+        for (let index = 0; index < head.length; index += 1) {
+          parts.push('<td' + alignAttr(index) + '>' + inline(cells[index] || '') + '</td>');
+        }
+        parts.push('</tr>');
+      }
+      parts.push('</tbody></table></div>');
+      html.push(parts.join(''));
+    };
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i];
       if (code !== null) {
@@ -6516,6 +6578,20 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         codeLang = fence[1] || '';
         continue;
       }
+      // GitHub-style table: header row, `|---|:--:|` divider, then body rows.
+      if (/\|/.test(line) && i + 1 < lines.length && isTableDivider(lines[i + 1])) {
+        flushParagraph();
+        closeList();
+        const body = [];
+        let cursor = i + 2;
+        while (cursor < lines.length && /\|/.test(lines[cursor]) && lines[cursor].trim()) {
+          body.push(lines[cursor]);
+          cursor += 1;
+        }
+        renderTable(line, lines[i + 1], body);
+        i = cursor - 1;
+        continue;
+      }
       if (!line.trim()) { flushParagraph(); closeList(); continue; }
       const heading = line.match(/^(#{1,6})\s+(.+)$/);
       if (heading) {
@@ -6528,6 +6604,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         flushParagraph();
         closeList();
         html.push('<hr>');
+        continue;
+      }
+      const task = line.match(/^\s*[-*+]\s+\[( |x|X)\]\s+(.+)$/);
+      if (task) {
+        flushParagraph();
+        if (list !== 'ul') { closeList(); html.push('<ul class="md-tasks">'); list = 'ul'; }
+        const checked = task[1].toLowerCase() === 'x';
+        html.push('<li class="md-task' + (checked ? ' md-task-done' : '') + '">'
+          + '<input type="checkbox" disabled' + (checked ? ' checked' : '') + '> ' + inline(task[2]) + '</li>');
         continue;
       }
       const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
@@ -10628,6 +10713,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   const douyinCapturedUrls = [];
   const genericCapturedUrls = [];
   const douyinDetailCache = new Map();
+  const douyinPageDataCache = new Map();
 
   window.addEventListener('message', event => {
     if (event.source !== window || !event.data) return;
@@ -11232,6 +11318,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     // Page snapshots contain every preloaded recommendation.  Without a target
     // id there is no safe way to attribute a play_addr to the current player.
     if (!/^\d{10,}$/.test(targetId)) return { urls: [], audioUrls: [] };
+    const cacheKey = targetId + '@' + location.pathname;
+    const cached = douyinPageDataCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < 60000) return cached.value;
     const roots = [];
     const add = value => { if (value) roots.push(value); };
     try { add(window._ROUTER_DATA); } catch (e) { /* ignore */ }
@@ -11262,7 +11351,13 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       collectDouyinUrls(root, urls, 0, '', targetId);
       collectDouyinAudioUrls(root, audioUrls, 0, '', targetId);
     }
-    return { urls, audioUrls };
+    const value = { urls, audioUrls };
+    douyinPageDataCache.set(cacheKey, { at: Date.now(), value });
+    if (douyinPageDataCache.size > 8) {
+      const oldest = [...douyinPageDataCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, douyinPageDataCache.size - 8);
+      for (const [key] of oldest) douyinPageDataCache.delete(key);
+    }
+    return value;
   }
 
   function douyinUrlParam(value, name) {
@@ -11642,7 +11737,13 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   function requestDouyinDetail(preferredAwemeId, anchorVideo) {
     return new Promise(resolve => {
       if (!/douyin\.com|iesdouyin\.com/i.test(location.hostname)) { resolve(null); return; }
-      const cacheKey = (preferredAwemeId ? String(preferredAwemeId) : '')
+      const requested = String(preferredAwemeId || '').trim();
+      // Ask for an explicit id whenever we can derive one.  Sending an empty id
+      // let the MAIN-world hook fall back to its own heuristics (address bar,
+      // last API id, preloaded neighbours), which is how a summary could come
+      // back describing a completely different clip.
+      const explicitId = /^\d{10,}$/.test(requested) ? requested : currentDouyinAwemeId(anchorVideo);
+      const cacheKey = (explicitId ? String(explicitId) : 'anon')
         + '|' + location.pathname
         + '|' + String(anchorVideo && (anchorVideo.currentSrc || anchorVideo.src) || '');
       const cached = douyinDetailCache.get(cacheKey);
@@ -11658,7 +11759,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         } catch (e) { /* ignore */ }
         window.removeEventListener('message', onMessage);
         clearTimeout(timer);
-        if (value && value.awemeId) {
+        // An anonymous request cannot be attributed to the clicked player.
+        // Drop the response instead of letting a neighbouring clip through.
+        if (value && value.awemeId && (!explicitId || String(value.awemeId) === String(explicitId))) {
           douyinDetailCache.set(cacheKey, { at: Date.now(), value });
           if (douyinDetailCache.size > 12) {
             const oldest = [...douyinDetailCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, douyinDetailCache.size - 12);
@@ -11678,7 +11781,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           anchorVideo.setAttribute('data-lps-current-video', '1');
           markedAnchor = true;
         }
-        window.postMessage({ source: 'LPS_DOUYIN_DETAIL', id, awemeId: preferredAwemeId || '' }, '*');
+        window.postMessage({ source: 'LPS_DOUYIN_DETAIL', id, awemeId: explicitId || '' }, '*');
       } catch (e) { finish(null); }
     });
   }
@@ -12905,10 +13008,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     node.style.fontSize = fs + 'px';
   }
 
-  function requestMediaDownload(item, candidate, kindOverride) {
+  function requestMediaDownload(item, candidate, kindOverride, filenameOverride) {
     const url = String(candidate && candidate.url || '');
     if (!url) { toast(item, '没有可下载的媒体地址'); return; }
-    const filename = cleanDownloadName(item, candidate, kindOverride);
+    const filename = filenameOverride || cleanDownloadName(item, candidate, kindOverride);
     if (/^blob:/i.test(url)) {
       fetch(url).then(response => response.blob()).then(blob => {
         downloadBlob(blob, filename);
@@ -13023,6 +13126,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
   async function downloadVideoFromSummary(item) {
     if (!item || item.closed) return;
+    if (/bilibili\.com/i.test(location.hostname)) { await downloadBilibiliVideo(item); return; }
     toast(item, '正在解析视频下载地址…');
     try {
       await ensureMediaForDownload(item);
@@ -13034,6 +13138,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
   async function downloadAudioFromSummary(item) {
     if (!item || item.closed) return;
+    if (/bilibili\.com/i.test(location.hostname)) { await downloadBilibiliAudio(item); return; }
     toast(item, '正在解析音频下载地址…');
     try {
       await ensureMediaForDownload(item);
@@ -13041,6 +13146,79 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     } catch (e) {
       toast(item, '音频下载失败：' + String(e && e.message || e || '未知错误'));
     }
+  }
+
+  function requestBilibiliVideo(url) {
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+      const timer = setTimeout(() => finish({ ok: false, reason: 'timeout', detail: 'B 站视频解析超过 20 秒没有返回' }), 20000);
+      if (!EXT || !EXT.runtime || !EXT.runtime.sendMessage) { finish({ ok: false, reason: 'no-runtime' }); return; }
+      try {
+        EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:resolveBilibiliVideo', url }, response => {
+          try { void EXT.runtime.lastError; } catch (e) { /* ignore */ }
+          finish(response || { ok: false, reason: 'no-response' });
+        });
+      } catch (e) { finish({ ok: false, reason: 'network', detail: String(e && e.message || e) }); }
+    });
+  }
+
+  function biliVideoInfoFromPage() {
+    try {
+      const roots = [window.__INITIAL_STATE__, window.__playinfo__, window.__INITIAL_DATA__];
+      for (const root of roots) {
+        if (!root || typeof root !== 'object') continue;
+        const video = root.videoData || (root.videoInfo && root.videoInfo.data) || root;
+        const title = String(video && (video.title || (video.videoData && video.videoData.title)) || '').trim();
+        if (title) return { title };
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  async function bilibiliProgressiveMedia() {
+    if (!/bilibili\.com/i.test(location.hostname)) return null;
+    const resolved = await requestBilibiliVideo(location.href);
+    if (!resolved || !resolved.ok || !resolved.url) return null;
+    return {
+      url: resolved.url,
+      urls: Array.isArray(resolved.urls) && resolved.urls.length ? resolved.urls : [resolved.url],
+      title: String(resolved.title || document.title || ''),
+      duration: Number(resolved.duration) || 0,
+      size: Number(resolved.size) || 0,
+      quality: Number(resolved.quality) || 0,
+      bvid: resolved.bvid || '',
+      cid: resolved.cid || ''
+    };
+  }
+
+  function bilibiliDownloadName(item, media, kind) {
+    const title = String((media && media.title) || (item && (item.title || (item.videoState && item.videoState.info && item.videoState.info.title))) || document.title || 'bilibili')
+      .replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 90) || 'bilibili';
+    const pageNo = (() => {
+      try { return Math.max(1, Number(new URLSearchParams(location.search).get('p')) || 1); } catch (e) { return 1; }
+    })();
+    const part = media && media.part ? ' - ' + String(media.part).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40) : '';
+    return title + part + ' P' + pageNo + (kind === 'audio' ? '.m4a' : '.mp4');
+  }
+
+  async function downloadBilibiliVideo(item) {
+    if (!item || item.closed) return;
+    toast(item, '正在解析 B 站视频地址…');
+    const media = await bilibiliProgressiveMedia();
+    if (!media) {
+      toast(item, 'B 站没有返回可下载的 MP4：请确认已登录、视频可正常播放（部分视频只提供 DASH 流）');
+      return;
+    }
+    requestMediaDownload(item, { url: media.url, kind: 'video' }, 'video', bilibiliDownloadName(item, media, 'video'));
+  }
+
+  async function downloadBilibiliAudio(item) {
+    if (!item || item.closed) return;
+    toast(item, '正在解析 B 站音频地址…');
+    const url = await bilibiliAudioUrl();
+    if (!url) { toast(item, '没有解析到 B 站音频流'); return; }
+    requestMediaDownload(item, { url, kind: 'audio' }, 'audio', bilibiliDownloadName(item, biliVideoInfoFromPage(), 'audio'));
   }
 
   function probeVideoCandidate(candidate, timeoutMs) {
@@ -14002,7 +14180,12 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         .sort((a, b) => videoActivityScore(b.element) - videoActivityScore(a.element))[0];
       return activeVideo && videoActivityScore(activeVideo.element) > 0 ? activeVideo : null;
     }
-    return list.find(candidate => candidate.url && !/^blob:/i.test(candidate.url)) || list[0] || null;
+    // Candidates flagged `downloadOnly` exist purely so "下载视频" has a real
+    // file; they must never be chosen as the thing to summarize.
+    const usable = list.filter(candidate => !candidate.downloadOnly);
+    return usable.find(candidate => candidate.url && !/^blob:/i.test(candidate.url) && candidate.kind === 'audio')
+      || usable.find(candidate => candidate.url && !/^blob:/i.test(candidate.url))
+      || usable[0] || null;
   }
 
   async function startMediaSummary(item) {
@@ -14071,9 +14254,24 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         state.textMode = false;
       }
     }
-    if (/bilibili\.com/i.test(location.hostname) && typeof bilibiliAudioUrl === 'function') {
-      updateSummaryLoading(item, 14, '正在解析 B 站音频地址…');
-      const biliAudio = await bilibiliAudioUrl();
+    if (/bilibili\.com/i.test(location.hostname)) {
+      // The player uses separate DASH video/audio `.m4s` files, which cannot be
+      // saved as one playable MP4.  Resolve the progressive (muxed) MP4 so both
+      // "下载视频" and the summary have a real, directly downloadable source.
+      updateSummaryLoading(item, 14, '正在解析 B 站音视频地址…');
+      const [biliMedia, biliAudio] = await Promise.all([
+        typeof bilibiliProgressiveMedia === 'function' ? bilibiliProgressiveMedia() : Promise.resolve(null),
+        typeof bilibiliAudioUrl === 'function' ? bilibiliAudioUrl() : Promise.resolve('')
+      ]);
+      if (biliMedia && biliMedia.url) {
+        state.list.unshift({
+          element: null, kind: 'video', url: biliMedia.url, srcKind: 'direct',
+          duration: Number(biliMedia.duration) || 0, title: biliMedia.title || document.title || '',
+          visible: true, verifiedVideo: true, downloadOnly: true
+        });
+        state.biliMedia = biliMedia;
+        state.textMode = false;
+      }
       if (biliAudio) {
         state.list.unshift({ element: null, kind: 'audio', url: biliAudio, srcKind: 'direct', duration: 0, title: document.title || '', visible: true });
         state.textMode = false;

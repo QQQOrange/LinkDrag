@@ -689,6 +689,10 @@ function generate_a_bogus(url_search_params, user_agent) {
     return '';
   }
   function lpsAwemeId(preferred) {
+    // An explicit request id always wins.  The caller (content script) derives
+    // it from the exact clicked player and refuses any other id in the reply,
+    // so falling back to DOM/URL heuristics here only added risk.
+    if (preferred && /^\d{10,}$/.test(String(preferred))) return String(preferred);
     function idFromVideo(video) {
       if (!video) return '';
       var attrNames = ['data-aweme-id', 'data-awemeid', 'data-video-id', 'data-videoid', 'data-item-id', 'data-itemid', 'data-vid', 'data-e2e-vid', 'data-id'];
@@ -724,14 +728,13 @@ function generate_a_bogus(url_search_params, user_agent) {
       return '';
     }
     // The marked node is the exact player that opened the summary.  Its DOM id
-    // always outranks a caller-supplied id, the address bar and API caches.
+    // outranks the address bar and API caches.
     var marked = null;
     try { marked = document.querySelector('[data-lps-current-video]'); } catch (e) { /* ignore */ }
     if (marked) {
       var markedId = idFromVideo(marked);
       if (markedId) return markedId;
     }
-    if (preferred && /^\d{10,}$/.test(String(preferred))) return String(preferred);
     var videos = marked ? [marked] : Array.prototype.slice.call(document.querySelectorAll('video'));
     try {
       videos.sort(function (a, b) {
