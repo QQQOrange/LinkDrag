@@ -35,21 +35,116 @@ const DEFAULT_AI_CONFIG = {
   mediaEndpoint: 'https://api.siliconflow.cn/v1/audio/transcriptions'
 };
 const aiStreamControllers = new WeakMap();
+try { importScripts('hls.js'); } catch (e) { /* parser unavailable */ }
+
 const CONTEXT_MENU_IDS = ['ldp-preview-link', 'ldp-preview-image', 'ldp-preview-selection', 'ldp-open-settings'];
 const MAX_FETCH_BYTES = 12 * 1024 * 1024;
 const capturedMediaByTab = new Map();
-const MEDIA_REQUEST_RE = /(douyinvod|video\/tos|aweme\/v1\/play|mime_type=video|mime_type=audio|\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.flv(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?))/i;
+const MEDIA_REQUEST_RE = /(douyinvod|video\/tos|aweme\/v1\/play|mime_type=video|mime_type=audio|\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.flv(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?)|\.webm(?:$|\?)|\.ts(?:$|\?)|\.aac(?:$|\?)|\.m3u8(?:$|\?))/i;
+const HLS_REQUEST_RE = /\.m3u8(?:$|\?)|[?&](?:format|type)=m3u8/i;
+/**
+ * Classify a captured media request so the content script can offer the right
+ * button.  Extensionless CDN URLs are common, so the response content-type from
+ * onHeadersReceived is the reliable signal; the URL pattern is the fallback.
+ */
+function classifyCapturedMedia(url, contentType) {
+  const target = String(url || '');
+  const type = String(contentType || '').toLowerCase();
+  if (HLS_REQUEST_RE.test(target) || /mpegurl/.test(type)) return 'hls';
+  if (/^audio\//.test(type) || /\.(?:mp3|m4a|aac|oga|opus|wav)(?:$|\?)/i.test(target)) return 'audio';
+  if (/^video\//.test(type) || /\.(?:mp4|m4s|flv|webm|mov|mkv|ts)(?:$|\?)/i.test(target)) return 'video';
+  return '';
+}
+// MV3 workers are evicted aggressively, which used to wipe the in-memory
+// capture list; a user who waited a few seconds before opening the summary got
+// "no downloadable media".  Mirror it into session storage (cleared when the
+// browser closes) so the data survives a worker restart.
+const CAPTURE_STORE_PREFIX = 'ldp:capturedMedia:';
+let capturePersistTimer = 0;
+function scheduleCapturePersist(tabId) {
+  if (capturePersistTimer) return;
+  capturePersistTimer = setTimeout(() => {
+    capturePersistTimer = 0;
+    try {
+      const payload = {};
+      for (const [id, list] of capturedMediaByTab) {
+        if (!list || !list.length) continue;
+        payload[CAPTURE_STORE_PREFIX + id] = list.slice(0, 32);
+      }
+      if (chrome.storage && chrome.storage.session) chrome.storage.session.set(payload).catch(() => {});
+    } catch (e) { /* ignore */ }
+  }, 700);
+}
+async function loadCapturedMedia(tabId) {
+  const memory = capturedMediaByTab.get(tabId);
+  if (Array.isArray(memory) && memory.length) return memory;
+  try {
+    if (!chrome.storage || !chrome.storage.session) return memory || [];
+    const key = CAPTURE_STORE_PREFIX + tabId;
+    const stored = await chrome.storage.session.get(key);
+    const list = stored && Array.isArray(stored[key]) ? stored[key] : [];
+    if (list.length) capturedMediaByTab.set(tabId, list);
+    return list;
+  } catch (e) { return memory || []; }
+}
+try {
+  if (chrome.tabs && chrome.tabs.onRemoved) {
+    chrome.tabs.onRemoved.addListener(tabId => {
+      capturedMediaByTab.delete(tabId);
+      try {
+        if (chrome.storage && chrome.storage.session) chrome.storage.session.remove(CAPTURE_STORE_PREFIX + tabId).catch(() => {});
+      } catch (e) { /* ignore */ }
+    });
+  }
+} catch (e) { /* ignore */ }
+
+function rememberCapturedMedia(tabId, url, requestType, contentType) {
+  if (tabId < 0 || !/^https?:\/\//i.test(String(url || ''))) return;
+  const kind = classifyCapturedMedia(url, contentType);
+  const list = capturedMediaByTab.get(tabId) || [];
+  const existing = list.find(entry => entry && entry.url === url);
+  if (existing) {
+    if (contentType && !existing.contentType) existing.contentType = String(contentType).slice(0, 80);
+    if (kind) existing.kind = kind;
+    scheduleCapturePersist(tabId);
+    return;
+  }
+  list.unshift({
+    url,
+    at: Date.now(),
+    type: requestType || '',
+    kind,
+    contentType: contentType ? String(contentType).slice(0, 80) : ''
+  });
+  if (list.length > 32) list.length = 32;
+  capturedMediaByTab.set(tabId, list);
+  scheduleCapturePersist(tabId);
+}
 if (chrome.webRequest && chrome.webRequest.onBeforeRequest) {
   chrome.webRequest.onBeforeRequest.addListener(details => {
     try {
-      if (details.tabId < 0 || !/^https?:\/\//i.test(String(details.url || ''))) return;
-      if (!MEDIA_REQUEST_RE.test(details.url)) return;
-      const list = capturedMediaByTab.get(details.tabId) || [];
-      list.unshift({ url: details.url, at: Date.now(), type: details.type || '' });
-      if (list.length > 24) list.length = 24;
-      capturedMediaByTab.set(details.tabId, list);
+      if (!MEDIA_REQUEST_RE.test(String(details.url || ''))) return;
+      rememberCapturedMedia(details.tabId, details.url, details.type, '');
     } catch (e) { /* ignore */ }
   }, { urls: ['<all_urls>'], types: ['media', 'xmlhttprequest', 'other'] }, []);
+}
+// Content-type sniffing: catches CDN URLs that carry no file extension, which is
+// how most modern Chinese video sites serve their streams.
+if (chrome.webRequest && chrome.webRequest.onHeadersReceived) {
+  chrome.webRequest.onHeadersReceived.addListener(details => {
+    try {
+      const headers = details.responseHeaders || [];
+      let contentType = '';
+      for (const header of headers) {
+        if (String(header.name || '').toLowerCase() !== 'content-type') continue;
+        contentType = String(header.value || '');
+        break;
+      }
+      if (!contentType) return;
+      if (!/^(?:video|audio)\//i.test(contentType) && !/mpegurl/i.test(contentType)) return;
+      rememberCapturedMedia(details.tabId, details.url, details.type, contentType);
+    } catch (e) { /* ignore */ }
+  }, { urls: ['<all_urls>'], types: ['media', 'xmlhttprequest', 'other'] }, ['responseHeaders']);
 }
 
 function storageGet(keys) {
@@ -330,9 +425,20 @@ function isPublicHttpUrl(value) {
     if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')
       || host.endsWith('.internal') || host === 'metadata.google.internal') return false;
     if (host === '::1' || host === '0.0.0.0') return false;
-    if (/^(fc|fd|fe8|fe9|fea|feb)/i.test(host)) return false;
+    if (/^\[?fc|^\[?fd|^\[?fe8|^\[?fe9|^\[?fea|^\[?feb/i.test(host)) return false;
     if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
       || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+    // Browsers also accept hex (0x7f000001), octal and plain-decimal (2130706433)
+    // spellings of an IPv4 address, which would slip past the dotted-quad checks.
+    if (/^(?:0x[0-9a-f]+|\d{6,})$/i.test(host)) {
+      const asNumber = /^0x/i.test(host) ? parseInt(host.slice(2), 16) : Number(host);
+      if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber <= 0xffffffff) {
+        const a = (asNumber >>> 24) & 255;
+        const b = (asNumber >>> 16) & 255;
+        if (a === 0 || a === 10 || a === 127 || (a === 169 && b === 254)
+          || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)) return false;
+      }
+    }
     return true;
   } catch (e) { return false; }
 }
@@ -704,6 +810,45 @@ async function fetchMediaBytes(url, timeoutMs, referer) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Resolve an HLS playlist into the concrete list of media segments.
+ * Master playlists are followed to the best (largest bandwidth) variant so a
+ * real download gets real quality instead of the audio rendition.
+ */
+async function resolveHlsSegments(url, depth) {
+  const parser = (typeof self !== 'undefined' && self.LinkDragHls) || (typeof LinkDragHls !== 'undefined' ? LinkDragHls : null);
+  const target = String(url || '');
+  if (!isPublicHttpUrl(target)) return { ok: false, reason: 'invalid-url' };
+  if (!parser) return { ok: false, reason: 'no-parser', detail: 'HLS 解析器未加载' };
+  if ((Number(depth) || 0) >= 3) return { ok: false, reason: 'invalid-hls', detail: 'HLS 播放列表嵌套过深' };
+  let playlist = '';
+  try {
+    const res = await fetch(target, { credentials: 'include', redirect: 'follow' });
+    if (!res.ok) return { ok: false, reason: 'http', detail: '播放列表 HTTP ' + res.status };
+    playlist = await res.text();
+  } catch (e) {
+    return { ok: false, reason: 'cors', detail: '播放列表跨域读取失败' };
+  }
+  const parsed = parser.parse(playlist, target);
+  if (!parsed.ok) return { ok: false, reason: parsed.reason || 'invalid-hls', detail: parsed.reason === 'empty-hls' ? '播放列表里没有可用内容' : '不是有效的 M3U8 播放列表' };
+  if (parsed.kind === 'master') {
+    // Follow the best variant so the download gets real quality.
+    const best = parser.bestVariant(parsed);
+    if (!best) return { ok: false, reason: 'empty-hls', detail: '主播放列表没有可用的码率' };
+    return resolveHlsSegments(best, (Number(depth) || 0) + 1);
+  }
+  return {
+    ok: true,
+    segments: parsed.segments,
+    count: parsed.segments.length,
+    duration: parsed.duration,
+    encrypted: parsed.encrypted,
+    keyMethod: parsed.keyMethod,
+    live: parsed.live,
+    target
+  };
 }
 
 async function fetchHlsDataUrl(url, depth) {
@@ -1957,9 +2102,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender && sender.tab && Number.isInteger(sender.tab.id)
       ? sender.tab.id
       : (Number.isInteger(message.tabId) ? message.tabId : -1);
-    const urls = tabId >= 0 ? (capturedMediaByTab.get(tabId) || []) : [];
-    sendResponse({ ok: true, urls });
-    return false;
+    if (tabId < 0) { sendResponse({ ok: true, urls: [] }); return false; }
+    loadCapturedMedia(tabId).then(urls => sendResponse({ ok: true, urls: urls || [] }),
+      () => sendResponse({ ok: true, urls: [] }));
+    return true;
+  }
+
+  if (type === 'ldp:hlsPlaylist') {
+    const url = String(message.url || '');
+    resolveHlsSegments(url).then(sendResponse, err => sendResponse({ ok: false, reason: 'network', detail: String(err && err.message || err || '') }));
+    return true;
+  }
+
+  if (type === 'ldp:hlsSegment') {
+    // CORS fallback: the service worker can read segments the page cannot.
+    const url = String(message.url || '');
+    if (!/^https?:\/\//i.test(url)) { sendResponse({ ok: false, reason: 'invalid-url' }); return false; }
+    fetch(url, { credentials: 'include', redirect: 'follow' })
+      .then(async res => {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const buffer = await res.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        sendResponse({ ok: true, base64: btoa(binary), size: bytes.length });
+      })
+      .catch(err => sendResponse({ ok: false, reason: 'network', detail: String(err && err.message || err || '') }));
+    return true;
   }
 
   if (type === 'ldp:downloadMedia') {

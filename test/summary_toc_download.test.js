@@ -42,7 +42,13 @@ test('active chapter drives the sticky heading', () => {
   assert.match(source, /toc-passed/);
   // Only the active chapter is sticky; making every heading sticky stacked them
   // on top of each other and made TOC jumps look like no-ops.
-  assert.match(source, /\.summary-scroll \.markdown \.toc-sticky\{position:sticky;top:0/);
+  assert.match(source, /\.summary-scroll \.markdown \.toc-sticky\{[\s\S]{0,400}position:sticky;top:0/);
+  // The pinned chapter must be visually distinct, not just another heading.
+  assert.match(source, /data-toc-badge/);
+  // The pinned chapter must use its own accent: --accent resolves to a neutral
+  // grey inside a summary window, which made the highlight invisible.
+  assert.match(source, /--toc-accent:#2f6fed/);
+  assert.match(source, /color:var\(--toc-accent\)/);
   assert.doesNotMatch(source, /\.markdown h1,\.summary-scroll \.markdown h2\{position:sticky/);
   assert.match(source, /nodeRect\.top - scrollerRect\.top <= 56/);
 });

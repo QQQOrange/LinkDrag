@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.1.18
+/* LinkDrag — Chromium extension v1.1.19
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.1.18 and writes extension/content.js.
+ * manifest version into 1.1.19 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.1.18'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.1.18', name: '' }; }
+      return { version: String(m.version || '1.1.19'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.1.19', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -345,7 +345,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.1.18';
+    return '1.1.19';
   })();
 
   const TOP = window.self === window.top;
@@ -866,6 +866,11 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
     return parts.join('+');
   }
   function isEditingInPage() {
+    // A field inside our own closed shadow root is invisible to
+    // document.activeElement (it reports the host), so consult the tracked node.
+    if (shadowEditingEl && shadowEditingEl.isConnected) {
+      try { if (shadowEditingEl.matches(':focus')) return true; } catch (e) { /* ignore */ }
+    }
     const ae = document.activeElement;
     if (!ae || ae === document.body) return false;
     if (ae.isContentEditable) return true;
@@ -1942,7 +1947,34 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
    滚动位置完全看不出来，点目录也像是「没跳」。
    现在由滚动监听给当前章节加 .toc-sticky，滚到下一章时下一个标题接管。 */
 .summary-scroll .markdown h1,.summary-scroll .markdown h2,.summary-scroll .markdown h3,.summary-scroll .markdown h4{scroll-margin-top:8px}
-.summary-scroll .markdown .toc-sticky{position:sticky;top:0;z-index:4;isolation:isolate;margin:0 -2px .5em;padding:7px 4px 6px;background:linear-gradient(180deg,var(--bg) 88%,color-mix(in srgb,var(--bg) 86%,transparent));border-radius:0 0 8px 8px}
+/* 当前章节的吸顶标题要明显区别于普通标题：左侧强调色竖条 + 主色文字 +
+   加粗放大 + 投影，让人一眼看出「我正停在这一章」。 */
+.summary-scroll .markdown .toc-sticky{
+  /* --accent resolves to a neutral grey inside a summary window, so the pinned
+     chapter uses its own guaranteed-visible accent per theme. */
+  --toc-accent:#2f6fed;
+  position:sticky;top:0;z-index:4;isolation:isolate;
+  margin:2px -8px 10px;padding:9px 12px 9px 15px;
+  font-size:calc(var(--summary-font-size,14px) + 1.5px);
+  font-weight:800;letter-spacing:.01em;
+  color:var(--toc-accent);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--toc-accent) 16%,var(--bg)) 0%,color-mix(in srgb,var(--toc-accent) 6%,var(--bg)) 62%,var(--bg) 100%);
+  border-radius:10px;
+  box-shadow:0 6px 16px -8px color-mix(in srgb,var(--toc-accent) 55%,transparent),0 1px 0 color-mix(in srgb,var(--toc-accent) 20%,transparent) inset;
+  backdrop-filter:blur(8px);
+}
+.summary-scroll .markdown .toc-sticky::before{
+  content:"";position:absolute;left:0;top:6px;bottom:6px;width:4px;border-radius:4px;
+  background:linear-gradient(180deg,var(--toc-accent),color-mix(in srgb,var(--toc-accent) 55%,transparent));
+}
+.summary-scroll .markdown .toc-sticky::after{
+  content:attr(data-toc-badge);position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  padding:1px 7px;border-radius:999px;font-size:9.5px;font-weight:700;letter-spacing:.02em;
+  color:var(--toc-accent);background:color-mix(in srgb,var(--toc-accent) 14%,transparent);
+  border:1px solid color-mix(in srgb,var(--toc-accent) 34%,transparent);
+}
+.summary-scroll .markdown .toc-sticky:not([data-toc-badge])::after{display:none}
+:host([data-theme="dark"]) .summary-scroll .markdown .toc-sticky{--toc-accent:#8fb4ff}
 .summary-scroll .markdown .toc-passed{opacity:.9}
 /* 总结内容区必须保有可用高度：追问框和操作栏都在 scroll 之外，
    没有这条下限时它们会把正文挤到几十像素，目录点击就无处可滚。 */
@@ -2772,6 +2804,23 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       backdrop: root.querySelector('.backdrop'),
       snapIndicator: root.querySelector('.snap-indicator')
     };
+    // Events retarget at the shadow boundary: window-level handlers only see the
+    // host, so `isEditingEvent()` could not tell that the user was typing in a
+    // panel field.  Track the real focused element here, where paths are intact.
+    const trackFocus = event => {
+      const node = event.target;
+      if (!node || node.nodeType !== 1) { shadowEditingEl = null; return; }
+      const tag = String(node.localName || '').toLowerCase();
+      shadowEditingEl = (node.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select') ? node : null;
+    };
+    root.addEventListener('focusin', trackFocus, true);
+    root.addEventListener('focusout', () => {
+      // Defer: focus may move straight to another field inside the same root.
+      setTimeout(() => {
+        if (!shadowEditingEl || !shadowEditingEl.isConnected) { shadowEditingEl = null; return; }
+        try { if (!shadowEditingEl.matches(':focus')) shadowEditingEl = null; } catch (e) { shadowEditingEl = null; }
+      }, 0);
+    }, true);
     document.documentElement.append(host);
     // 窗口重建时把已有窗口重新挂回新的 shadow root
     if (windows.length) for (const item of windows) if (!item.closed) root.append(item.ui.win);
@@ -2786,6 +2835,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     renderTheme(true);
   }
   function isEffPip(w) { return w.pip && !w.inArrange; }
+
+  /** Focused editable inside our closed shadow root (see ensureShell). */
+  let shadowEditingEl = null;
 
   let appliedThemeSig = '';
   let appliedThemeHost = null;
@@ -13321,6 +13373,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       // Prefer the candidate capability detection already verified; it may be a
       // direct URL or a fetchable blob source that is not part of the list.
       const verified = item.downloadVideoCandidate;
+      if (verified && verified.srcKind === 'hls') {
+        const base = String((item.videoState && item.videoState.info && item.videoState.info.title) || document.title || 'video')
+          .replace(/[\\/:*?"<>|\r\n\t]+/g, '_').trim().slice(0, 80) || 'video';
+        const name = base + '.ts';
+        const result = await downloadHlsStream(item, verified.url, { label: '视频', filename: name });
+        downloadBlob(result.blob, result.filename);
+        updateDownloadProgress(item, 100, '视频已保存');
+        return;
+      }
       const list = item.mediaState && Array.isArray(item.mediaState.list) ? item.mediaState.list : null;
       if (verified && verified.url && list && !list.includes(verified)) list.unshift(verified);
       await downloadMediaVideo(item);
@@ -13787,7 +13848,36 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
             } catch (e) { /* blob: cannot be HEAD-ed; stays unavailable */ }
           }
         }
-        if (!caps.video) caps.note = '当前视频没有可直接下载的文件';
+        if (!caps.video && !caps.audio) {
+          // Nothing usable in the DOM (blob players are the norm on streaming
+          // sites).  Fall back to the network sniffer: any media response the
+          // page itself loaded is downloadable with the page's own cookies.
+          try {
+            const sniffed = await EXT.runtime.sendMessage({ type: 'ldp:getCapturedMedia' });
+            const entries = (sniffed && Array.isArray(sniffed.urls) ? sniffed.urls : [])
+              .slice()
+              .sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+            const pick = kind => entries.find(entry => entry && entry.kind === kind && /^https?:\/\//i.test(String(entry.url || ''))) || null;
+            const hls = pick('hls');
+            const video = pick('video');
+            const audio = pick('audio');
+            if (video) {
+              caps.video = true;
+              item.downloadVideoCandidate = { url: video.url, kind: 'video', srcKind: 'sniffed', duration: 0 };
+              if (video.contentType) caps.videoHint = '下载视频 · ' + video.contentType;
+            } else if (hls) {
+              caps.video = true;
+              caps.hls = true;
+              item.downloadVideoCandidate = { url: hls.url, kind: 'video', srcKind: 'hls', duration: 0 };
+              caps.videoHint = '下载视频 · HLS 流（分片合并）';
+            }
+            if (audio) {
+              caps.audio = true;
+              item.downloadAudioCandidate = { url: audio.url, kind: 'audio', srcKind: 'sniffed', duration: 0 };
+            }
+          } catch (e) { /* no sniffer data */ }
+        }
+        if (!caps.video && !caps.audio) caps.note = '当前视频没有可直接下载的文件';
       }
     } catch (e) {
       caps.note = String(e && e.message || e || '');
@@ -13828,6 +13918,67 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
 
   /** 流式下载，按已接收字节回报进度（拿不到 content-length 时按"已下载"显示）。 */
+  /**
+   * Download an HLS (m3u8) stream: resolve the playlist into segments, fetch
+   * them in order with real progress, then concatenate.  MPEG-TS segments
+   * concatenate losslessly, so the result is a playable .ts file — that is how
+   * most live/VOD streams can be saved without a server-side muxer.
+   */
+  async function downloadHlsStream(item, playlistUrl, options) {
+    const opts = options || {};
+    const label = opts.label || '视频';
+    const filename = opts.filename || 'hls-stream.ts';
+    updateDownloadProgress(item, 2, '正在解析' + label + '播放列表…');
+    let playlist = null;
+    try {
+      playlist = await EXT.runtime.sendMessage({ type: 'ldp:hlsPlaylist', url: playlistUrl });
+    } catch (e) {
+      throw new Error('无法读取播放列表：' + String(e && e.message || e || ''));
+    }
+    if (!playlist || !playlist.ok) {
+      throw new Error((playlist && playlist.detail) || '播放列表解析失败');
+    }
+    if (playlist.encrypted) {
+      throw new Error('该 HLS 流使用 ' + (playlist.keyMethod || 'AES') + ' 加密，浏览器内无法解密');
+    }
+    const segments = playlist.segments || [];
+    if (!segments.length) throw new Error('播放列表里没有分片');
+    const parts = [];
+    let received = 0;
+    for (let i = 0; i < segments.length; i += 1) {
+      if (item.closed) throw new Error('已关闭');
+      const index = i + 1;
+      const basePercent = (i / segments.length) * 100;
+      updateDownloadProgress(item, Math.min(99, basePercent), '正在下载' + label + '分片 ' + index + '/' + segments.length);
+      let chunk = null;
+      try {
+        // Direct fetch keeps the page's cookies; most segment CDNs allow CORS.
+        const response = await fetch(segments[i], { credentials: 'include' });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        chunk = await response.arrayBuffer();
+      } catch (e) {
+        // Fall back to the service worker, which bypasses CORS.
+        const viaBg = await EXT.runtime.sendMessage({ type: 'ldp:hlsSegment', url: segments[i] });
+        if (!viaBg || !viaBg.ok || !viaBg.base64) {
+          throw new Error('分片 ' + index + ' 下载失败：' + String((viaBg && viaBg.detail) || e && e.message || e || ''));
+        }
+        const binary = atob(viaBg.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let k = 0; k < binary.length; k += 1) bytes[k] = binary.charCodeAt(k);
+        chunk = bytes.buffer;
+      }
+      parts.push(chunk);
+      received += chunk.byteLength;
+      const sizeText = Math.round(received / 1024 / 1024 * 10) / 10 + 'MB';
+      updateDownloadProgress(item, Math.min(99, ((i + 1) / segments.length) * 100),
+        '已下载' + label + ' ' + sizeText + ' · 分片 ' + index + '/' + segments.length);
+    }
+    updateDownloadProgress(item, 99, '正在合并' + label + '…');
+    const blob = new Blob(parts, { type: 'video/mp2t' });
+    updateDownloadProgress(item, 100, '已准备完成，开始保存');
+    return { blob, filename, size: blob.size };
+  }
+
   async function fetchBlobWithProgress(url, onProgress, options) {
     const init = Object.assign({ credentials: 'include' }, options || {});
     const response = await fetch(url, init);
@@ -13918,8 +14069,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         const index = headings.indexOf(heading);
         if (index < 0) return;
         headings.forEach((h, i) => {
-          h.classList.toggle('toc-sticky', i === index);
+          const active = i === index;
+          h.classList.toggle('toc-sticky', active);
           h.classList.toggle('toc-passed', i < index);
+          if (active) h.dataset.tocBadge = '当前'; else delete h.dataset.tocBadge;
         });
       } catch (e) { /* ignore */ }
     };
@@ -14071,8 +14224,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       });
       items.forEach((button, index) => button.classList.toggle('active', index === active));
       headings.forEach((node, index) => {
-        node.classList.toggle('toc-sticky', index === active);
+        const isActive = index === active;
+        node.classList.toggle('toc-sticky', isActive);
         node.classList.toggle('toc-passed', index < active);
+        if (isActive) node.dataset.tocBadge = '当前'; else delete node.dataset.tocBadge;
       });
     };
     item._tocScroll = () => { if (!raf) raf = requestAnimationFrame(sync); };
@@ -14227,9 +14382,16 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
   }
 
   function buildFollowupBox(item) {
-    // A previous render's composer may still be attached (panel rebuilds happen
-    // on every streaming tick).  Remove it first so ids stay unique and clicks
-    // cannot land on a detached twin.
+    // Reuse the existing composer instead of rebuilding it.  IME sessions, voice
+    // input targets, selection and focus are bound to the element: recreating it
+    // on a panel re-render silently dropped whatever the input method was doing,
+    // which is why only plain keyboard typing appeared to work.
+    if (item.ui && item.ui.followupBox) {
+      // The caller re-appends it; keep the very same node (and its IME state).
+      return item.ui.followupBox;
+    }
+    // A previous render's composer may still be attached.  Remove it so ids stay
+    // unique and clicks cannot land on a detached twin.
     try {
       const panel = item.ui && item.ui.panel;
       if (panel) panel.querySelectorAll('.followup-box').forEach(node => node.remove());
@@ -14293,11 +14455,24 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         submit();
       }
     });
+    // Make the composer behave like a plain <textarea>: nothing outside it may
+    // observe, cancel or re-route its input events.  Global shortcut, gesture
+    // and "click outside" handlers used to interfere with IME / voice input and
+    // paste.  stopPropagation never calls preventDefault, so the browser's own
+    // editing behaviour (typing, composition, paste, drop) stays intact.
+    ['keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'paste', 'cut', 'copy',
+      'compositionstart', 'compositionupdate', 'compositionend', 'textInput',
+      'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick',
+      'contextmenu', 'dragstart', 'dragover', 'dragenter', 'drop', 'selectstart'
+    ].forEach(type => {
+      wrap.addEventListener(type, event => { event.stopPropagation(); }, true);
+    });
     row.appendChild(input);
     row.appendChild(send);
     wrap.appendChild(head);
     wrap.appendChild(list);
     wrap.appendChild(row);
+    input.dataset.followupAlive = '1';
     item.ui.followupBox = wrap;
     item.ui.followupList = list;
     item.ui.followupInput = input;

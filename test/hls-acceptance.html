@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>HLS 下载验收页</title>
+  <style>
+    body { margin: 0; padding: 32px; font: 15px/1.7 system-ui, "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #1f2430; }
+    video { display: block; width: 640px; max-width: 100%; height: 340px; background: #101522; border-radius: 12px; }
+    #log { margin-top: 14px; font: 12px/1.6 ui-monospace, monospace; color: #4a5568; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>HLS 下载验收页</h1>
+  <p>播放器使用 <code>blob:</code> 地址（现代流媒体站点的常见做法），真正的流地址只出现在网络请求里。
+     扩展必须能从网络层嗅探到 m3u8，并据此提供「下载视频」。</p>
+  <video id="player" controls playsinline autoplay muted></video>
+  <div id="log">等待流地址…</div>
+  <script>
+    // A silent, always-decodable source so the player is "eligible" for the AI
+    // summary button; the media device is a blob: URL on purpose.
+    (function makeBlobVideo() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640; canvas.height = 360;
+      const ctx = canvas.getContext('2d');
+      let frame = 0;
+      const paint = () => {
+        ctx.fillStyle = 'hsl(' + ((frame * 2) % 360) + ',55%,22%)';
+        ctx.fillRect(0, 0, 640, 360);
+        ctx.fillStyle = '#e8f4ff';
+        ctx.font = '30px sans-serif';
+        ctx.fillText('HLS fixture ' + frame, 40, 190);
+        frame += 1;
+      };
+      paint();
+      try {
+        const stream = canvas.captureStream(12);
+        const video = document.getElementById('player');
+        video.srcObject = stream;
+        video.play().catch(() => {});
+      } catch (e) {
+        document.getElementById('log').textContent = 'captureStream 不可用：' + e.message;
+      }
+    })();
+
+    // Trigger a real network request for the HLS playlist so the extension's
+    // webRequest sniffer records it for this tab — exactly like a player would.
+    const HLS_URL = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+    fetch(HLS_URL).then(res => res.text()).then(text => {
+      document.getElementById('log').textContent =
+        'm3u8 已加载 · ' + text.split(/\r?\n/).filter(l => l && !l.startsWith('#')).length + ' 个条目';
+    }).catch(err => {
+      document.getElementById('log').textContent = 'm3u8 加载失败：' + err.message;
+    });
+  </script>
+</body>
+</html>

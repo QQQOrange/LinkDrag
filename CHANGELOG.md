@@ -1,5 +1,19 @@
 # 变更记录
 
+## v1.1.19 — 输入方式、吸顶标题与视频下载（2026-11-09）
+
+- **追问框不再限制输入方式**：输入框改为普通文本框行为，隔离了所有全局快捷键 / 手势 /「点外面」处理器；不再在回答期间 `disabled`；IME 与语音输入的目标元素在面板重绘后不再被销毁（复用同一节点）；草稿与焦点跨重绘保留。实测支持键盘、`Input.insertText`（听写工具）、`execCommand`、Ctrl+V 粘贴、IME 组合输入、直接赋值六种路径。
+- 修正 `isEditingEvent` 在 closed shadow root 下的重定向失效（与上一版目录 bug 同源），面板内输入框现在会被正确识别为「正在编辑」。
+- **吸顶章节标题更醒目**：左侧强调色竖条、主色文字、加粗放大、渐变底与投影，并显示「当前」徽标；改用专用 `--toc-accent`（`--accent` 在总结面板里解析为灰色，原设计看不出来）。
+- **视频下载能力增强**（参考 res-downloader / MediaSync 的嗅探思路）：
+  - 后台网络嗅探升级：新增 `onHeadersReceived` 按 content-type 识别无扩展名的 CDN 地址，覆盖 `.m3u8/.ts/.webm/.aac` 等，并区分 video / audio / hls。
+  - 嗅探结果持久化到 `chrome.storage.session`，service worker 休眠后不再丢失。
+  - 新增 HLS(m3u8) 下载：解析主播放列表取最高码率、逐分片下载并合并为 `.ts`，带分片级进度；页面跨域失败时自动改用后台取分片。
+  - `blob:` 播放器且 DOM 无直链时，自动回退到网络嗅探结果，从而提供下载按钮。
+  - 新增 `extension/hls.js` 纯解析器（可单测），后台通过 `importScripts` 复用。
+  - 加固 SSRF 防护：拦截十六进制/十进制 IP 写法（`0x7f000001`、`2130706433`）。
+- 新增验收脚本：`tools/accept_input.js`（六种输入方式）、`tools/accept_hls.js`、`tools/cdp.js`；新增 `test/hls_download.test.js`（10 项）。
+
 ## v1.1.18 — 目录点击无反应与语音输入（2026-11-09）
 
 - **修复「点击目录没有任何反应」的真正根因**：总结界面在 closed shadow root 内，挂在 `document` 上的「点外面收起目录」监听器拿到的是被重定向的 `composedPath`（只剩 host），于是点目录项自己被误判成「点外面」，列表在 `pointerdown` 瞬间被隐藏 —— 元素消失后 `mouseup`/`click` 都收不到，跳转永远不会发生。现在在 shadow root 内部用真实路径判断，并让 document 层忽略宿主内部事件。
