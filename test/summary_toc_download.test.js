@@ -160,3 +160,19 @@ test('downloads go through the extension channel, not a CORS-bound page fetch', 
     assert.match(window, /namespace: 'LPS_EXT'/, type + ' must carry the namespace');
   }
 });
+
+
+test('the outline icon sits inside the pinned chapter bar, in front of the title', () => {
+  // Requirement: the icon belongs to the pinned bar itself (same row, left of the
+  // chapter title) and opens the outline right below it.
+  assert.match(source, /trigger\.className = 'toc-inline-trigger'/);
+  assert.match(source, /\.toc-inline-trigger\{position:absolute/);
+  // The bar reserves a left inset so the icon never overlaps the title text.
+  assert.match(source, /padding:9px 12px 9px 38px/);
+  // Positioning is pure overlay: the answer's markdown DOM is never modified.
+  assert.doesNotMatch(source, /insertBefore\(trigger/);
+  assert.match(source, /trigger\.style\.left = Math\.round\(r\.left - pr\.left \+ 9\)/);
+  // The dropdown anchors under the bar.
+  assert.match(source, /\.summary-toc-list\{position:absolute/);
+  assert.match(source, /list\.style\.top = Math\.round\(hr\.bottom - pr\.top \+ 6\)/);
+});

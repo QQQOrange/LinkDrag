@@ -1931,11 +1931,17 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .markdown li.md-task-done{color:var(--muted);text-decoration:line-through}
 .markdown del{color:var(--muted)}
 /* 总结目录：默认只显示一个按钮，点开才展开；当前章节标题吸顶。 */
-.summary-toc{position:absolute;top:56px;right:14px;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none}
+.summary-toc{position:absolute;inset:0;z-index:6;pointer-events:none}
+/* 目录图标就在「当前章节横条」最左侧：竖条右边、标题文字之前。
+   它是叠加层，不写进 Markdown，因此不会干扰流式重绘。 */
+.toc-inline-trigger{position:absolute;display:inline-grid;place-items:center;width:21px;height:21px;padding:0;border:1px solid color-mix(in srgb,var(--toc-accent,var(--accent)) 48%,transparent);border-radius:7px;background:color-mix(in srgb,var(--toc-accent,var(--accent)) 15%,var(--bg));color:var(--toc-accent,var(--accent));cursor:pointer;pointer-events:auto;z-index:2;transition:background .15s ease}
+.toc-inline-trigger:hover{background:color-mix(in srgb,var(--toc-accent,var(--accent)) 28%,var(--bg))}
+.toc-inline-trigger[hidden]{display:none}
+.toc-inline-trigger[aria-expanded="true"]{background:color-mix(in srgb,var(--toc-accent,var(--accent)) 28%,var(--bg))}
 .summary-toc-toggle{pointer-events:auto;display:inline-grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:9px;background:color-mix(in srgb,var(--surface) 88%,transparent);color:var(--muted);cursor:pointer;box-shadow:0 6px 16px -12px rgba(18,28,48,.5)}
 .summary-toc-toggle:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
 .summary-toc.open .summary-toc-toggle{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
-.summary-toc-list{pointer-events:auto;width:min(230px,52vw);max-height:min(52vh,360px);overflow-y:auto;padding:6px;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 96%,transparent);box-shadow:0 18px 44px -24px rgba(18,28,48,.6);scrollbar-width:thin}
+.summary-toc-list{position:absolute;pointer-events:auto;width:min(240px,60vw);max-height:min(52vh,360px);overflow-y:auto;padding:6px;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 96%,transparent);box-shadow:0 18px 44px -24px rgba(18,28,48,.6);scrollbar-width:thin}
 .summary-toc-item{display:block;width:100%;padding:6px 8px;border:0;border-radius:7px;background:transparent;color:var(--text);text-align:left;font-size:11.5px;line-height:1.45;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .summary-toc-item:hover{background:var(--hover);color:var(--accent)}
 .summary-toc-item.active{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font-weight:650}
@@ -1954,7 +1960,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
      chapter uses its own guaranteed-visible accent per theme. */
   --toc-accent:#2f6fed;
   position:sticky;top:0;z-index:4;isolation:isolate;
-  margin:2px -8px 10px;padding:9px 12px 9px 15px;
+  margin:2px -8px 10px;padding:9px 12px 9px 38px;
   font-size:calc(var(--summary-font-size,14px) + 1.5px);
   font-weight:800;letter-spacing:.01em;
   color:var(--toc-accent);
@@ -14299,6 +14305,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         list.hidden = true;
         wrap.classList.remove('open');
         toggle.setAttribute('aria-expanded', 'false');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
       };
       const rootNode = (() => { try { return wrap.getRootNode(); } catch (e) { return document; } })();
       if (rootNode && rootNode !== document && rootNode.addEventListener) {
@@ -14314,6 +14321,39 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         if (host && (target === host || (host.contains && host.contains(target)))) return;
         closeIfOutside(event);
       }, true);
+    }
+    let trigger = nav.querySelector('.toc-inline-trigger');
+    if (!trigger) {
+      trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'toc-inline-trigger';
+      trigger.title = '目录';
+      trigger.setAttribute('aria-label', '目录');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.hidden = true;
+      trigger.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M2 3.5h12a.75.75 0 0 1 0 1.5H2a.75.75 0 0 1 0-1.5Zm0 4h12a.75.75 0 0 1 0 1.5H2a.75.75 0 0 1 0-1.5Zm0 4h8a.75.75 0 0 1 0 1.5H2a.75.75 0 0 1 0-1.5Z"/></svg>';
+      nav.appendChild(trigger);
+      trigger.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const open = list.hidden;
+        list.hidden = !open;
+        trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        nav.classList.toggle('open', open);
+        if (open) positionList();
+      });
+    }
+    // Anchor the dropdown directly under the pinned bar, inside panel coords.
+    function positionList() {
+      const panelEl = (item.ui && item.ui.panel) || nav.parentElement;
+      const heading = root.querySelector('h1.toc-sticky, h2.toc-sticky, h3.toc-sticky, h4.toc-sticky');
+      const pr = panelEl.getBoundingClientRect();
+      const hr = heading ? heading.getBoundingClientRect() : root.getBoundingClientRect();
+      const width = Math.min(240, Math.max(190, hr.width || 220));
+      const left = Math.max(6, Math.min(hr.left - pr.left, pr.width - width - 6));
+      list.style.left = Math.round(left) + 'px';
+      list.style.top = Math.round(hr.bottom - pr.top + 6) + 'px';
+      list.style.width = Math.round(width) + 'px';
     }
     const list = nav.querySelector('.summary-toc-list');
     list.innerHTML = '';
@@ -14360,6 +14400,22 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         node.classList.toggle('toc-passed', index < active);
         if (isActive) node.dataset.tocBadge = '当前'; else delete node.dataset.tocBadge;
       });
+      // Park the outline icon in the pinned bar's left inset: same row, in front
+      // of the chapter title.  Pure positioning -- the answer DOM is untouched,
+      // so a streaming re-render is never disturbed.
+      const activeHeading = headings[active];
+      if (activeHeading && activeHeading.isConnected) {
+        const panelEl = (item.ui && item.ui.panel) || nav.parentElement;
+        const r = activeHeading.getBoundingClientRect();
+        const pr = panelEl.getBoundingClientRect();
+        trigger.hidden = false;
+        trigger.style.left = Math.round(r.left - pr.left + 9) + 'px';
+        trigger.style.top = Math.round(r.top - pr.top + (r.height - 21) / 2) + 'px';
+      } else {
+        trigger.hidden = true;
+        if (!list.hidden) { list.hidden = true; trigger.setAttribute('aria-expanded', 'false'); }
+      }
+      if (!list.hidden) positionList();
     };
     item._tocScroll = () => { if (!raf) raf = requestAnimationFrame(sync); };
     item._tocScrollTarget = root;
