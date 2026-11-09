@@ -1,11 +1,11 @@
-/* LinkDrag — Chromium extension v1.1.22
+/* LinkDrag — Chromium extension v1.1.23
  * ---------------------------------------------------------------------------
  * Ported from the v20.3.0 userscript.  The core engine is kept intact; this
  * wrapper provides the browser-extension runtime: MV3 messaging, privileged
  * fetch, storage, context menus, toolbar popup and site-level pause controls.
  *
  * This file is the maintained source.  tools/build_content.py stamps the
- * manifest version into 1.1.22 and writes extension/content.js.
+ * manifest version into 1.1.23 and writes extension/content.js.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -16,8 +16,8 @@
   const LPS_MANIFEST = (() => {
     try {
       const m = chrome.runtime.getManifest();
-      return { version: String(m.version || '1.1.22'), name: String(m.name || '') };
-    } catch (e) { return { version: '1.1.22', name: '' }; }
+      return { version: String(m.version || '1.1.23'), name: String(m.name || '') };
+    } catch (e) { return { version: '1.1.23', name: '' }; }
   })();
   // Registered before the core's drag handlers so the drop handler can tell
   // an in-page link/image drag from an external tab/OS drop.  A page-internal
@@ -345,7 +345,7 @@ const DEFAULT_AI_CONFIG = { provider: 'deepseek', endpoint: AI_PROVIDERS[0].endp
         return String(GM_info.script.version);
       }
     } catch (e) { /* 忽略 */ }
-    return '1.1.22';
+    return '1.1.23';
   })();
 
   const TOP = window.self === window.top;
@@ -1934,17 +1934,23 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .summary-toc{position:absolute;inset:0;z-index:6;pointer-events:none}
 /* 目录图标就在「当前章节横条」最左侧：竖条右边、标题文字之前。
    它是叠加层，不写进 Markdown，因此不会干扰流式重绘。 */
-.toc-inline-trigger{position:absolute;display:inline-grid;place-items:center;width:21px;height:21px;padding:0;border:1px solid color-mix(in srgb,var(--toc-accent,var(--accent)) 48%,transparent);border-radius:7px;background:color-mix(in srgb,var(--toc-accent,var(--accent)) 15%,var(--bg));color:var(--toc-accent,var(--accent));cursor:pointer;pointer-events:auto;z-index:2;transition:background .15s ease}
-.toc-inline-trigger:hover{background:color-mix(in srgb,var(--toc-accent,var(--accent)) 28%,var(--bg))}
+/* 图标不要做成「横条里的另一个小方块」：无边框、无填充，直接用横条自身的
+   强调色，靠透明度弱化，只在悬停/展开时轻轻铺一层同色底，视觉上属于横条本身。 */
+/* 图标用横条自己的强调色（不能用 inherit：它不在标题元素内，会继承面板的
+   深色正文色，看起来就是一块深色小方块）。无边框、无常态底色，只在悬停/展开
+   时铺一层同色淡底，视觉上属于横条本身。 */
+.toc-inline-trigger{position:absolute;display:inline-grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--toc-accent,var(--accent));opacity:.7;cursor:pointer;pointer-events:auto;z-index:2;appearance:none;-webkit-appearance:none;box-shadow:none;outline:none;transition:opacity .16s ease,background-color .16s ease}
+.toc-inline-trigger:hover{opacity:1;background-color:color-mix(in srgb,var(--toc-accent,var(--accent)) 12%,transparent)}
+.toc-inline-trigger:focus-visible{opacity:1;outline:2px solid color-mix(in srgb,var(--toc-accent,var(--accent)) 40%,transparent);outline-offset:1px}
 .toc-inline-trigger[hidden]{display:none}
-.toc-inline-trigger[aria-expanded="true"]{background:color-mix(in srgb,var(--toc-accent,var(--accent)) 28%,var(--bg))}
+.toc-inline-trigger[aria-expanded="true"]{opacity:1;background-color:color-mix(in srgb,var(--toc-accent,var(--accent)) 15%,transparent)}
 .summary-toc-toggle{pointer-events:auto;display:inline-grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:9px;background:color-mix(in srgb,var(--surface) 88%,transparent);color:var(--muted);cursor:pointer;box-shadow:0 6px 16px -12px rgba(18,28,48,.5)}
 .summary-toc-toggle:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
 .summary-toc.open .summary-toc-toggle{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
 .summary-toc-list{position:absolute;pointer-events:auto;width:min(240px,60vw);max-height:min(52vh,360px);overflow-y:auto;padding:6px;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 96%,transparent);box-shadow:0 18px 44px -24px rgba(18,28,48,.6);scrollbar-width:thin}
 .summary-toc-item{display:block;width:100%;padding:6px 8px;border:0;border-radius:7px;background:transparent;color:var(--text);text-align:left;font-size:11.5px;line-height:1.45;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.summary-toc-item:hover{background:var(--hover);color:var(--accent)}
-.summary-toc-item.active{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font-weight:650}
+.summary-toc-item:hover{background:color-mix(in srgb,var(--toc-accent,var(--accent)) 9%,transparent);color:var(--toc-accent,var(--accent))}
+.summary-toc-item.active{background:color-mix(in srgb,var(--toc-accent,var(--accent)) 13%,transparent);color:var(--toc-accent,var(--accent));font-weight:650}
 .summary-toc-item[data-level="3"]{padding-left:18px;font-size:11px}
 .summary-toc-item[data-level="4"]{padding-left:28px;font-size:10.5px;color:var(--muted)}
 /* 章节标题吸顶：滚动到本章节时贴住滚动区顶部。 */
@@ -1956,17 +1962,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 /* 当前章节的吸顶标题要明显区别于普通标题：左侧强调色竖条 + 主色文字 +
    加粗放大 + 投影，让人一眼看出「我正停在这一章」。 */
 .summary-scroll .markdown .toc-sticky{
-  /* --accent resolves to a neutral grey inside a summary window, so the pinned
-     chapter uses its own guaranteed-visible accent per theme. */
-  --toc-accent:#2f6fed;
   position:sticky;top:0;z-index:4;isolation:isolate;
   margin:2px -8px 10px;padding:9px 12px 9px 38px;
   font-size:calc(var(--summary-font-size,14px) + 1.5px);
   font-weight:800;letter-spacing:.01em;
   color:var(--toc-accent);
-  background:linear-gradient(90deg,color-mix(in srgb,var(--toc-accent) 16%,var(--bg)) 0%,color-mix(in srgb,var(--toc-accent) 6%,var(--bg)) 62%,var(--bg) 100%);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--toc-accent) 11%,var(--bg)) 0%,color-mix(in srgb,var(--toc-accent) 5%,var(--bg)) 58%,var(--bg) 100%);
   border-radius:10px;
-  box-shadow:0 6px 16px -8px color-mix(in srgb,var(--toc-accent) 55%,transparent),0 1px 0 color-mix(in srgb,var(--toc-accent) 20%,transparent) inset;
+  box-shadow:0 4px 12px -10px color-mix(in srgb,var(--toc-accent) 45%,transparent);
   backdrop-filter:blur(8px);
 }
 .summary-scroll .markdown .toc-sticky::before{
@@ -1976,14 +1979,15 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .summary-scroll .markdown .toc-sticky::after{
   content:attr(data-toc-badge);position:absolute;right:10px;top:50%;transform:translateY(-50%);
   padding:1px 7px;border-radius:999px;font-size:9.5px;font-weight:700;letter-spacing:.02em;
-  color:var(--toc-accent);background:color-mix(in srgb,var(--toc-accent) 14%,transparent);
-  border:1px solid color-mix(in srgb,var(--toc-accent) 34%,transparent);
+  color:var(--toc-accent);background:color-mix(in srgb,var(--toc-accent) 13%,transparent);
+  border:0;opacity:.92;
 }
 .summary-scroll .markdown .toc-sticky:not([data-toc-badge])::after{display:none}
-:host([data-theme="dark"]) .summary-scroll .markdown .toc-sticky{--toc-accent:#8fb4ff}
 .summary-scroll .markdown .toc-passed{opacity:.9}
 /* 总结内容区必须保有可用高度：追问框和操作栏都在 scroll 之外，
    没有这条下限时它们会把正文挤到几十像素，目录点击就无处可滚。 */
+.window.summary-window{--toc-accent:#2f6fed}
+:host([data-theme="dark"]) .window.summary-window{--toc-accent:#8fb4ff}
 .window.summary-window .summary-scroll{min-height:150px}
 /* 下载进度：先下完再保存，进度条在总结内容区下方。 */
 .download-progress{flex:0 0 auto;display:flex;flex-direction:column;gap:5px;margin:2px 0 0;padding:9px 12px;border:1px solid color-mix(in srgb,var(--border) 58%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 52%,transparent)}
@@ -14350,7 +14354,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       const pr = panelEl.getBoundingClientRect();
       const hr = heading ? heading.getBoundingClientRect() : root.getBoundingClientRect();
       const width = Math.min(240, Math.max(190, hr.width || 220));
-      const left = Math.max(6, Math.min(hr.left - pr.left, pr.width - width - 6));
+      const left = Math.max(6, Math.min(hr.left - pr.left + 2, pr.width - width - 6));
       list.style.left = Math.round(left) + 'px';
       list.style.top = Math.round(hr.bottom - pr.top + 6) + 'px';
       list.style.width = Math.round(width) + 'px';

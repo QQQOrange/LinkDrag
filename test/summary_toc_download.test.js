@@ -176,3 +176,19 @@ test('the outline icon sits inside the pinned chapter bar, in front of the title
   assert.match(source, /\.summary-toc-list\{position:absolute/);
   assert.match(source, /list\.style\.top = Math\.round\(hr\.bottom - pr\.top \+ 6\)/);
 });
+
+
+test('the outline icon uses the bar accent, not the neutral --accent', () => {
+  // Regression: `color:inherit` picked up the panel's dark body colour and
+  // `var(--accent)` resolves to a neutral grey inside a summary window, which
+  // made the icon a dark/grey chip sitting on a blue bar.
+  assert.match(source, /\.toc-inline-trigger\{[^}]*color:var\(--toc-accent,var\(--accent\)\)/);
+  assert.doesNotMatch(source, /\.toc-inline-trigger\{[^}]*color:inherit/);
+  // The accent is defined on the window so both the bar and the icon resolve it.
+  assert.match(source, /\.window\.summary-window\{--toc-accent:#2f6fed\}/);
+  assert.match(source, /:host\(\[data-theme="dark"\]\) \.window\.summary-window\{--toc-accent:#8fb4ff\}/);
+  // Dropdown highlight uses the same hue.
+  assert.match(source, /\.summary-toc-item\.active\{background:color-mix\(in srgb,var\(--toc-accent/);
+  // No permanent chip: the fill only appears on hover / expanded.
+  assert.match(source, /\.toc-inline-trigger\{[^}]*background:transparent/);
+});
