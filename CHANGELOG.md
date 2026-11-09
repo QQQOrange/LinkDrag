@@ -1,5 +1,18 @@
 # 变更记录
 
+## v1.1.21 — 下载方案补全：嗅探 / HLS / DASH（2026-11-09）
+
+按 res-downloader、MediaSync 的下载思路把覆盖补齐：
+
+- **网络嗅探扩展到全部类型**：`.mp4/.m4s/.flv/.webm/.ts/.aac/.mp3/.m4a/.m3u8/.mpd`，并用 `onHeadersReceived` 的 content-type 识别没有扩展名的 CDN 地址；结果区分 video / audio / hls / dash，持久化到 `chrome.storage.session`，service worker 休眠不丢失。
+- **HLS（m3u8）**：解析主播放列表取最高码率、逐分片下载并合并为 `.ts`，带分片级进度；页面跨域失败自动改用后台取分片；加密流明确提示。
+- **DASH（mpd）新增**：解析 AdaptationSet，分别取出最高分辨率的画面与独立音轨，各存一个文件（浏览器无法合流，与 ffmpeg 类工具的产物一致）。修复了一个偏移量 bug——子块内的偏移被错误地应用到整份文档上，导致总选中最低分辨率。
+- **扩展通道下载**：内容脚本的 `fetch` 受页面 CORS 限制，改为由 offscreen 文档以扩展身份取流（带 cookie、分块回报进度），再交给下载 API 保存。
+- **失败降级链**：后台通道 → 浏览器直接下载（浏览器 cookie + DNR Referer）→ 页面内 fetch，失败原因直接显示在进度文字里，不再只说“下载失败”。
+- 下载入口直接使用能力探测已确认的地址（此前依赖 `mediaState`，视频总结面板没有该对象，会静默卡住）。
+
+新增 `test/dash_download.test.js`（7 项）与 DASH 后台解析验证。
+
 ## v1.1.20 — 视频下载真正可用（2026-11-09）
 
 三个真实缺陷让「下载视频」一直不工作，均已定位并修复：

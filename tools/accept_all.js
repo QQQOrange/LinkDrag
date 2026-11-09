@@ -171,18 +171,25 @@ async function main() {
 
   if (triggers.length) {
     // The trigger must be a child of the panel's heading, i.e. part of the bar.
+    // The icon is an overlay parked inside the pinned bar's left inset; verify
+    // geometry (same row, left edge) rather than DOM nesting.
     const placement = await callOn(page, triggers[0].nodeId, [
       'function(){',
-      '  const heading = this.closest("h1,h2,h3,h4");',
+      '  const scroller = this.closest(".window");',
+      '  const heading = scroller && scroller.querySelector("h1.toc-sticky, h2.toc-sticky, h3.toc-sticky, h4.toc-sticky");',
+      '  const t = this.getBoundingClientRect();',
+      '  const h = heading ? heading.getBoundingClientRect() : null;',
       '  return {',
-      '    insideHeading: !!heading,',
-      '    headingSticky: heading ? heading.classList.contains("toc-sticky") : false,',
-      '    firstChild: heading ? heading.firstChild === this : false,',
-      '    badge: heading ? (heading.dataset.tocBadge || "") : ""',
+      '    hidden: this.hidden,',
+      '    hasStickyBar: !!heading,',
+      '    sameRow: h ? (t.top >= h.top - 2 && t.bottom <= h.bottom + 2) : false,',
+      '    nearLeft: h ? (t.left >= h.left - 2 && t.left - h.left <= 24) : false,',
+      '    badge: heading ? (heading.dataset.tocBadge || "") : "",',
+      '    icon: [Math.round(t.left), Math.round(t.top), Math.round(t.width)]',
       '  };',
       '}'
     ].join('\n'));
-    check('trigger lives at the left of the sticky heading', placement && placement.insideHeading && placement.headingSticky && placement.firstChild, placement);
+    check('outline icon sits in the pinned bar, on its left', !!(placement && !placement.hidden && placement.hasStickyBar && placement.sameRow && placement.nearLeft), placement);
 
     const collapsed = await callOn(page, triggers[0].nodeId, 'function(){const l=this.closest(".summary-toc").querySelector(".summary-toc-list");return !!l.hidden}');
     check('outline starts collapsed', collapsed === true, collapsed);

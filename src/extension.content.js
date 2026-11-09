@@ -13366,6 +13366,9 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 
   async function downloadVideoFromSummary(item) {
     if (!item || item.closed) return;
+    if (item.downloadVideoCandidate && /\.mpd(?:$|\?)/i.test(String(item.downloadVideoCandidate.url || ''))) {
+      item.downloadVideoCandidate.srcKind = 'dash';
+    }
     if (/bilibili\.com/i.test(location.hostname)) { await downloadBilibiliVideo(item); return; }
     updateDownloadProgress(item, 2, '正在解析视频下载地址…');
     try {
@@ -13373,6 +13376,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       // Prefer the candidate capability detection already verified; it may be a
       // direct URL or a fetchable blob source that is not part of the list.
       const verified = item.downloadVideoCandidate;
+      if (verified && verified.srcKind === 'dash') {
+        updateDownloadProgress(item, 3, '正在解析 DASH 清单…');
+        await downloadDashStream(item, verified.url, {
+          label: '视频',
+          base: cleanBaseDownloadName(item)
+        });
+        return;
+      }
       if (verified && verified.srcKind === 'hls') {
         const base = String((item.videoState && item.videoState.info && item.videoState.info.title) || document.title || 'video')
           .replace(/[\\/:*?"<>|\r\n\t]+/g, '_').trim().slice(0, 80) || 'video';
@@ -13885,6 +13896,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
               .sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
             const pick = kind => entries.find(entry => entry && entry.kind === kind && /^https?:\/\//i.test(String(entry.url || ''))) || null;
             const hls = pick('hls');
+            const dash = pick('dash');
             const video = pick('video');
             const audio = pick('audio');
             if (video) {
@@ -13896,6 +13908,10 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
               caps.hls = true;
               item.downloadVideoCandidate = { url: hls.url, kind: 'video', srcKind: 'hls', duration: 0 };
               caps.videoHint = '下载视频 · HLS 流（分片合并）';
+            } else if (dash) {
+              caps.video = true;
+              item.downloadVideoCandidate = { url: dash.url, kind: 'video', srcKind: 'dash', duration: 0 };
+              caps.videoHint = '下载视频 · DASH 流（音视频分别保存）';
             }
             if (audio) {
               caps.audio = true;
@@ -13973,13 +13989,70 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       throw new Error(String(e && e.message || e || '下载通道不可用'));
     }
     if (!response || !response.ok) {
-      throw new Error((response && response.detail) || (response && response.reason) || '下载失败');
+      // Fallback: let the browser fetch the URL directly.  It carries the
+      // browser's own cookies and the DNR Referer rules, which is the most
+      // compatible option for hot-link protected CDNs.
+      const reason = String((response && (response.detail || response.reason)) || '未知原因');
+      updateDownloadProgress(item, 6, '后台通道受限（' + reason + '），改用浏览器直接下载…');
+      let direct = null;
+      try {
+        direct = await EXT.runtime.sendMessage({
+          namespace: 'LPS_EXT',
+          type: 'ldp:downloadMedia',
+          url: opts.url,
+          filename: opts.filename
+        });
+      } catch (e) { direct = null; }
+      if (direct && direct.ok) {
+        updateDownloadProgress(item, 100, label + '已交给浏览器下载');
+        setTimeout(() => hideDownloadProgress(item), 3000);
+        return direct;
+      }
+      throw new Error(reason
+        + (direct && (direct.detail || direct.reason) ? ' / ' + String(direct.detail || direct.reason) : ''));
     }
     const size = Number(response.size || 0);
     const sizeText = size ? ' · ' + Math.round(size / 1024 / 1024 * 10) / 10 + 'MB' : '';
     updateDownloadProgress(item, 100, label + '已交给浏览器下载' + sizeText);
     setTimeout(() => hideDownloadProgress(item), 3000);
     return response;
+  }
+
+  /**
+   * Download an MPEG-DASH stream.  Video and audio are separate files; the
+   * browser cannot mux them, so both are saved with clear names (this is the
+   * same split ffmpeg-based downloaders show their users).
+   */
+  async function downloadDashStream(item, manifestUrl, options) {
+    const opts = options || {};
+    const label = opts.label || '视频';
+    const base = opts.base || 'dash';
+    updateDownloadProgress(item, 2, '正在解析' + label + '清单…');
+    let manifest = null;
+    try {
+      manifest = await EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:dashManifest', url: manifestUrl });
+    } catch (e) {
+      throw new Error('无法读取清单：' + String(e && e.message || e || ''));
+    }
+    if (!manifest || !manifest.ok) throw new Error((manifest && manifest.detail) || '清单解析失败');
+    const video = manifest.video;
+    const audio = manifest.audio;
+    if (!video && !audio) throw new Error('清单里没有可下载的流');
+    let savedVideo = false;
+    if (video && video.url) {
+      const quality = video.height ? ' · ' + video.height + 'p' : '';
+      const name = base + quality.replace(/[^0-9p.]/g, '') + '.mp4';
+      await proxyDownload(item, { url: video.url, filename: base + '.mp4', label: label + '画面' + quality });
+      savedVideo = true;
+    }
+    if (audio && audio.url) {
+      await proxyDownload(item, { url: audio.url, filename: base + '.m4a', label: label + '音轨' });
+    }
+    updateDownloadProgress(item, 100, savedVideo && audio
+      ? '音视频已分别保存（浏览器无法合并，可用 ffmpeg 合流）'
+      : '已交给浏览器下载');
+    setTimeout(() => hideDownloadProgress(item), 4000);
+    return { ok: true, video: !!video, audio: !!audio };
   }
 
   async function downloadHlsStream(item, playlistUrl, options) {

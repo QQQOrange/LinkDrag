@@ -42,8 +42,9 @@ const MAX_FETCH_BYTES = 12 * 1024 * 1024;
 const capturedMediaByTab = new Map();
 /** Tab currently receiving proxy-download progress (set per download). */
 let lastDownloadTabId = -1;
-const MEDIA_REQUEST_RE = /(douyinvod|video\/tos|aweme\/v1\/play|mime_type=video|mime_type=audio|\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.flv(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?)|\.webm(?:$|\?)|\.ts(?:$|\?)|\.aac(?:$|\?)|\.m3u8(?:$|\?))/i;
+const MEDIA_REQUEST_RE = /(douyinvod|video\/tos|aweme\/v1\/play|mime_type=video|mime_type=audio|\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.flv(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?)|\.webm(?:$|\?)|\.ts(?:$|\?)|\.aac(?:$|\?)|\.m3u8(?:$|\?)|\.mpd(?:$|\?))/i;
 const HLS_REQUEST_RE = /\.m3u8(?:$|\?)|[?&](?:format|type)=m3u8/i;
+const DASH_REQUEST_RE = /\.mpd(?:$|\?)/i;
 /**
  * Classify a captured media request so the content script can offer the right
  * button.  Extensionless CDN URLs are common, so the response content-type from
@@ -53,6 +54,7 @@ function classifyCapturedMedia(url, contentType) {
   const target = String(url || '');
   const type = String(contentType || '').toLowerCase();
   if (HLS_REQUEST_RE.test(target) || /mpegurl/.test(type)) return 'hls';
+  if (DASH_REQUEST_RE.test(target) || /dash\+xml/.test(type)) return 'dash';
   if (/^audio\//.test(type) || /\.(?:mp3|m4a|aac|oga|opus|wav)(?:$|\?)/i.test(target)) return 'audio';
   if (/^video\//.test(type) || /\.(?:mp4|m4s|flv|webm|mov|mkv|ts)(?:$|\?)/i.test(target)) return 'video';
   return '';
@@ -819,6 +821,36 @@ async function fetchMediaBytes(url, timeoutMs, referer) {
  * Master playlists are followed to the best (largest bandwidth) variant so a
  * real download gets real quality instead of the audio rendition.
  */
+/**
+ * Resolve an MPEG-DASH manifest into concrete stream URLs.
+ * DASH keeps video and audio apart, so the caller gets one entry per kind and
+ * saves them as two files (a browser cannot mux them; ffmpeg-based tools do).
+ */
+async function resolveDashManifest(url) {
+  const parser = (typeof self !== 'undefined' && self.LinkDragHls) || (typeof LinkDragHls !== 'undefined' ? LinkDragHls : null);
+  const target = String(url || '');
+  if (!isPublicHttpUrl(target)) return { ok: false, reason: 'invalid-url' };
+  if (!parser || typeof parser.parseDash !== 'function') return { ok: false, reason: 'no-parser' };
+  let text = '';
+  try {
+    const res = await fetch(target, { credentials: 'include', redirect: 'follow' });
+    if (!res.ok) return { ok: false, reason: 'http', detail: '清单 HTTP ' + res.status };
+    text = await res.text();
+  } catch (e) {
+    return { ok: false, reason: 'cors', detail: '清单跨域读取失败' };
+  }
+  const parsed = parser.parseDash(text, target);
+  if (!parsed.ok) return { ok: false, reason: parsed.reason || 'invalid-mpd', detail: '无法解析 DASH 清单' };
+  const describe = entry => entry && entry.best ? {
+    url: entry.best.url,
+    height: entry.best.height,
+    width: entry.best.width,
+    bandwidth: entry.best.bandwidth,
+    mimeType: entry.mimeType
+  } : null;
+  return { ok: true, video: describe(parsed.video), audio: describe(parsed.audio), target };
+}
+
 async function resolveHlsSegments(url, depth) {
   const parser = (typeof self !== 'undefined' && self.LinkDragHls) || (typeof LinkDragHls !== 'undefined' ? LinkDragHls : null);
   const target = String(url || '');
@@ -2188,6 +2220,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, reason: 'download-failed', detail: String(e && e.message || e) });
       }
     })();
+    return true;
+  }
+
+  if (type === 'ldp:dashManifest') {
+    resolveDashManifest(String(message.url || '')).then(sendResponse,
+      err => sendResponse({ ok: false, reason: 'network', detail: String(err && err.message || err || '') }));
     return true;
   }
 
