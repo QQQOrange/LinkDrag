@@ -1896,7 +1896,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 .media-summary-answer,.video-summary-answer{min-height:180px!important;padding:17px 18px!important;font-size:13.5px;line-height:1.78!important;overflow:visible!important;max-height:none!important}
 .summary-answer-card:empty::before{content:"正在整理内容…";color:var(--muted);font-weight:500}
 
-.summary-actions{position:relative!important;bottom:auto!important;z-index:3;display:flex;flex:0 0 auto;flex-wrap:wrap;align-items:center;gap:7px;margin:0!important;padding:10px 14px 12px!important;border-top:1px solid color-mix(in srgb,var(--border) 42%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 88%,transparent),var(--surface) 48%);box-shadow:0 -10px 24px -26px rgba(20,32,60,.48);border-radius:0}
+.summary-actions{position:relative!important;bottom:auto!important;z-index:3;display:flex;flex:0 0 auto;flex-wrap:wrap;align-items:center;gap:7px;margin:0!important;padding:10px 21px 12px!important;border-top:1px solid color-mix(in srgb,var(--border) 42%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 88%,transparent),var(--surface) 48%);box-shadow:0 -10px 24px -26px rgba(20,32,60,.48);border-radius:0}
 .summary-actions .text-button{padding:8px 11px!important;border-radius:9px!important;font-weight:600!important}
 .summary-actions .summary-action-primary{color:#fff!important;border-color:transparent!important;background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#7c5ce7))!important;box-shadow:0 8px 18px -10px color-mix(in srgb,var(--accent) 72%,transparent)}
 .summary-actions .summary-action-primary:hover{filter:brightness(1.06)}
@@ -1992,7 +1992,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
 /* The composer sits between the scrolling answer and the action bar.  It must
    never live inside .summary-scroll: that container is clipped by the panel's
    overflow:hidden, which left the textarea invisible and impossible to type in. */
-.followup-box{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;gap:6px;margin:0;padding:8px 14px 9px;border-top:1px solid color-mix(in srgb,var(--border) 46%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 92%,transparent),var(--surface));z-index:3;position:relative}
+.followup-box{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;gap:6px;margin:0;padding:9px 21px 10px;border-top:1px solid color-mix(in srgb,var(--border) 46%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 92%,transparent),var(--surface));z-index:3;position:relative}
 .followup-box[hidden]{display:none!important}
 .followup-head{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
 .followup-title{font-size:calc(var(--summary-font-size,14px) - 2px);font-weight:700;color:var(--text)}
@@ -13382,6 +13382,22 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         updateDownloadProgress(item, 100, '视频已保存');
         return;
       }
+      if (verified && verified.url && /^https?:\/\//i.test(verified.url)) {
+        const ext = /\.(mp4|webm|mov|mkv|flv|ts)(?:$|\?)/i.exec(verified.url);
+        const name = cleanBaseDownloadName(item) + (ext ? '.' + ext[1].toLowerCase() : '.mp4');
+        const sameOrigin = (() => {
+          try { return new URL(verified.url).origin === location.origin; } catch (e) { return false; }
+        })();
+        if (sameOrigin) {
+          await prepareAndSave(item, { url: verified.url, label: '视频', kind: 'video', filename: name });
+          return;
+        }
+        // downloadMediaVideo() reads item.mediaState, which does not exist on a
+        // video-summary panel; it returned silently and the progress bar froze
+        // on "正在解析视频下载地址…" forever.
+        await proxyDownload(item, { url: verified.url, filename: name, label: '视频' });
+        return;
+      }
       const list = item.mediaState && Array.isArray(item.mediaState.list) ? item.mediaState.list : null;
       if (verified && verified.url && list && !list.includes(verified)) list.unshift(verified);
       await downloadMediaVideo(item);
@@ -13769,8 +13785,18 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         button.title = hint || label;
       }
     };
-    const videoBtn = item.ui.videoDownloadBtn || item.ui.mediaDownload;
-    const audioBtn = item.ui.videoAudioBtn || item.ui.mediaAudioDownload;
+    // The panel may have switched mode; `videoDownloadBtn || mediaDownload`
+    // used to pick a detached node from the previous panel, so the visible
+    // button never got enabled and clicking it did nothing.
+    const media = item.panelMode === 'media';
+    const pickBtn = (kind) => {
+      const list = kind === 'audio'
+        ? (media ? [item.ui.mediaAudioDownload, item.ui.videoAudioBtn] : [item.ui.videoAudioBtn, item.ui.mediaAudioDownload])
+        : (media ? [item.ui.mediaDownload, item.ui.videoDownloadBtn] : [item.ui.videoDownloadBtn, item.ui.mediaDownload]);
+      return list.find(b => b && b.isConnected) || null;
+    };
+    const videoBtn = pickBtn('video');
+    const audioBtn = pickBtn('audio');
     apply(videoBtn, next.video, '下载视频', next.videoHint || '下载完整视频文件');
     apply(audioBtn, next.audio, '下载音频', next.audioHint || '下载独立音轨文件');
   }
@@ -13853,7 +13879,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
           // sites).  Fall back to the network sniffer: any media response the
           // page itself loaded is downloadable with the page's own cookies.
           try {
-            const sniffed = await EXT.runtime.sendMessage({ type: 'ldp:getCapturedMedia' });
+            const sniffed = await EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:getCapturedMedia' });
             const entries = (sniffed && Array.isArray(sniffed.urls) ? sniffed.urls : [])
               .slice()
               .sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
@@ -13924,6 +13950,38 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
    * concatenate losslessly, so the result is a playable .ts file — that is how
    * most live/VOD streams can be saved without a server-side muxer.
    */
+  /**
+   * Download through the extension origin (offscreen document).
+   * A content script's fetch() obeys the site's CORS policy, which is why most
+   * CDN downloads ended in "Failed to fetch"; this path has host permissions,
+   * sends cookies and saves through the downloads API.
+   */
+  async function proxyDownload(item, options) {
+    const opts = options || {};
+    const label = opts.label || '视频';
+    updateDownloadProgress(item, 3, '正在连接' + label + '源…');
+    let response = null;
+    try {
+      response = await EXT.runtime.sendMessage({
+        namespace: 'LPS_EXT',
+        type: 'ldp:proxyDownload',
+        url: opts.url,
+        filename: opts.filename,
+        referer: location.href
+      });
+    } catch (e) {
+      throw new Error(String(e && e.message || e || '下载通道不可用'));
+    }
+    if (!response || !response.ok) {
+      throw new Error((response && response.detail) || (response && response.reason) || '下载失败');
+    }
+    const size = Number(response.size || 0);
+    const sizeText = size ? ' · ' + Math.round(size / 1024 / 1024 * 10) / 10 + 'MB' : '';
+    updateDownloadProgress(item, 100, label + '已交给浏览器下载' + sizeText);
+    setTimeout(() => hideDownloadProgress(item), 3000);
+    return response;
+  }
+
   async function downloadHlsStream(item, playlistUrl, options) {
     const opts = options || {};
     const label = opts.label || '视频';
@@ -13931,7 +13989,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
     updateDownloadProgress(item, 2, '正在解析' + label + '播放列表…');
     let playlist = null;
     try {
-      playlist = await EXT.runtime.sendMessage({ type: 'ldp:hlsPlaylist', url: playlistUrl });
+      playlist = await EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:hlsPlaylist', url: playlistUrl });
     } catch (e) {
       throw new Error('无法读取播放列表：' + String(e && e.message || e || ''));
     }
@@ -13958,7 +14016,7 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
         chunk = await response.arrayBuffer();
       } catch (e) {
         // Fall back to the service worker, which bypasses CORS.
-        const viaBg = await EXT.runtime.sendMessage({ type: 'ldp:hlsSegment', url: segments[i] });
+        const viaBg = await EXT.runtime.sendMessage({ namespace: 'LPS_EXT', type: 'ldp:hlsSegment', url: segments[i] });
         if (!viaBg || !viaBg.ok || !viaBg.base64) {
           throw new Error('分片 ' + index + ' 下载失败：' + String((viaBg && viaBg.detail) || e && e.message || e || ''));
         }
@@ -15426,10 +15484,14 @@ iframe{display:block;border:0;transform-origin:0 0;background:var(--bg);color-sc
       if (item.ui && item.ui.mediaSource) item.ui.mediaSource.textContent = mediaSourceNote(state);
     }
     if (item.ui && item.ui.mediaDownload) {
-      item.ui.mediaDownload.hidden = !((state.list || []).some(value => value.kind === 'video' && value.url) || candidate.kind === 'video');
+      const ready = (state.list || []).some(value => value.kind === 'video' && value.url) || candidate.kind === 'video';
+      item.ui.mediaDownload.hidden = !ready;
+      item.ui.mediaDownload.disabled = !ready;
     }
     if (item.ui && item.ui.mediaAudioDownload) {
-      item.ui.mediaAudioDownload.hidden = !((state.list || []).some(value => value.kind === 'audio' && value.url) || candidate.kind === 'audio' || candidate.kind === 'video');
+      const ready = (state.list || []).some(value => value.kind === 'audio' && value.url) || candidate.kind === 'audio' || candidate.kind === 'video';
+      item.ui.mediaAudioDownload.hidden = !ready;
+      item.ui.mediaAudioDownload.disabled = !ready;
     }
     updateSummaryLoading(item, 18, candidate.kind === 'audio' ? '已找到音频，正在准备…' : '已找到视频，正在准备本地音频…');
     if (status) status.textContent = candidate.kind === 'audio' ? '正在准备音频链路…' : '正在准备视频链路…';

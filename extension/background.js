@@ -40,6 +40,8 @@ try { importScripts('hls.js'); } catch (e) { /* parser unavailable */ }
 const CONTEXT_MENU_IDS = ['ldp-preview-link', 'ldp-preview-image', 'ldp-preview-selection', 'ldp-open-settings'];
 const MAX_FETCH_BYTES = 12 * 1024 * 1024;
 const capturedMediaByTab = new Map();
+/** Tab currently receiving proxy-download progress (set per download). */
+let lastDownloadTabId = -1;
 const MEDIA_REQUEST_RE = /(douyinvod|video\/tos|aweme\/v1\/play|mime_type=video|mime_type=audio|\.mp4(?:$|\?)|\.m4s(?:$|\?)|\.flv(?:$|\?)|\.mp3(?:$|\?)|\.m4a(?:$|\?)|\.webm(?:$|\?)|\.ts(?:$|\?)|\.aac(?:$|\?)|\.m3u8(?:$|\?))/i;
 const HLS_REQUEST_RE = /\.m3u8(?:$|\?)|[?&](?:format|type)=m3u8/i;
 /**
@@ -1303,6 +1305,17 @@ async function ensureOffscreen() {
           justification: 'Decode and transcribe long media audio in a DOM-capable offscreen document.'
         });
       }
+      // createDocument() resolves before offscreen.js has registered its
+      // message listener; posting immediately produced "no response" and the
+      // download looked broken.  Wait until the context exists, then one tick.
+      if (chrome.runtime.getContexts) {
+        for (let i = 0; i < 12; i += 1) {
+          const live = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+          if (live && live.length) break;
+          await new Promise(resolve => setTimeout(resolve, 120));
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 180));
       return true;
     } catch (e) {
       return false;
@@ -2098,6 +2111,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (type === 'downloadProgress' && message.target === 'ldp-background') {
+    // Progress relayed from the offscreen document to the page that asked.
+    try {
+      if (lastDownloadTabId >= 0) {
+        chrome.tabs.sendMessage(lastDownloadTabId, {
+          type: 'ldp:downloadProgress',
+          jobId: message.jobId,
+          percent: message.percent,
+          received: message.received,
+          total: message.total
+        }, () => { try { void chrome.runtime.lastError; } catch (e) { /* ignore */ } });
+      }
+    } catch (e) { /* ignore */ }
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (type === 'ldp:getCapturedMedia') {
     const tabId = sender && sender.tab && Number.isInteger(sender.tab.id)
       ? sender.tab.id
@@ -2105,6 +2135,59 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (tabId < 0) { sendResponse({ ok: true, urls: [] }); return false; }
     loadCapturedMedia(tabId).then(urls => sendResponse({ ok: true, urls: urls || [] }),
       () => sendResponse({ ok: true, urls: [] }));
+    return true;
+  }
+
+  if (type === 'ldp:proxyDownload') {
+    // Preferred download path: read the file in the offscreen document (no CORS,
+    // cookies included, real progress), then save through the downloads API.
+    const url = String(message.url || '');
+    if (!/^https?:\/\//i.test(url)) { sendResponse({ ok: false, reason: 'invalid-url' }); return false; }
+    const filename = String(message.filename || 'media-download').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 140);
+    const tabId = sender && sender.tab && Number.isInteger(sender.tab.id) ? sender.tab.id : -1;
+    lastDownloadTabId = tabId;
+    const jobId = 'dl-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    (async () => {
+      const ready = await ensureOffscreen();
+      if (!ready) { sendResponse({ ok: false, reason: 'offscreen-unavailable', detail: '无法建立后台下载通道' }); return; }
+      let result = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        result = await new Promise(resolve => {
+          try {
+            chrome.runtime.sendMessage({
+              target: 'ldp-offscreen',
+              type: 'download',
+              request: { url, jobId, referer: message.referer || '' }
+            }, response => {
+              try { void chrome.runtime.lastError; } catch (e) { /* ignore */ }
+              resolve(response || null);
+            });
+          } catch (e) { resolve({ ok: false, reason: 'exception', detail: String(e && e.message || e) }); }
+        });
+        if (result && result.ok) break;
+        if (result && result.reason === 'network') break;   // real network error, do not retry
+        await new Promise(resolve => setTimeout(resolve, 400));
+      }
+      result = result || { ok: false, reason: 'no-response', detail: '后台下载通道没有响应' };
+      if (!result || !result.ok || !result.objectUrl) {
+        sendResponse(result || { ok: false, reason: 'failed' });
+        return;
+      }
+      try {
+        chrome.downloads.download({ url: result.objectUrl, filename, saveAs: false }, id => {
+          const error = chrome.runtime.lastError;
+          // The blob URL stays alive inside the offscreen document; it is
+          // revoked there on a timer so the download can finish reading it.
+          try {
+            chrome.runtime.sendMessage({ target: 'ldp-offscreen', type: 'revoke', url: result.objectUrl }, () => { try { void chrome.runtime.lastError; } catch (e) { /* ignore */ } });
+          } catch (e) { /* ignore */ }
+          if (id) sendResponse({ ok: true, id, size: result.size, mode: 'proxy', jobId, tabId });
+          else sendResponse({ ok: false, reason: 'download-failed', detail: error && error.message ? String(error.message).slice(0, 160) : '' });
+        });
+      } catch (e) {
+        sendResponse({ ok: false, reason: 'download-failed', detail: String(e && e.message || e) });
+      }
+    })();
     return true;
   }
 

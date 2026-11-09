@@ -161,3 +161,76 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   });
   return true;
 });
+
+/**
+ * Stream a media file through the extension origin.
+ *
+ * A content script's fetch() is subject to the page's CORS policy, which is why
+ * most CDN downloads failed there.  Here we run with the extension's host
+ * permissions: cookies are sent (credentials: 'include'), CORS does not apply,
+ * and the body is read in chunks so real progress can be reported.
+ */
+async function proxyDownload(request) {
+  const url = String(request && request.url || '');
+  const jobId = String(request && request.jobId || '');
+  if (!/^https?:\/\//i.test(url)) return { ok: false, reason: 'invalid-url' };
+  const report = (percent, received, total) => {
+    try {
+      chrome.runtime.sendMessage({ target: 'ldp-background', type: 'downloadProgress', jobId, percent, received, total });
+    } catch (e) { /* worker asleep; progress is best-effort */ }
+  };
+  let response = null;
+  try {
+    response = await fetch(url, {
+      credentials: 'include',
+      redirect: 'follow',
+      headers: request && request.referer ? { Referer: request.referer } : undefined
+    });
+  } catch (e) {
+    return { ok: false, reason: 'network', detail: String(e && e.message || e) };
+  }
+  if (!response.ok) return { ok: false, reason: 'http', detail: 'HTTP ' + response.status };
+  const total = Number(response.headers.get('content-length') || 0);
+  const type = response.headers.get('content-type') || 'application/octet-stream';
+  const parts = [];
+  let received = 0;
+  try {
+    if (response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      for (;;) {
+        const step = await reader.read();
+        if (step.done) break;
+        parts.push(step.value);
+        received += step.value.length;
+        if (total) report(Math.min(99, (received / total) * 100), received, total);
+      }
+    } else {
+      const buffer = await response.arrayBuffer();
+      parts.push(new Uint8Array(buffer));
+      received = buffer.byteLength;
+    }
+  } catch (e) {
+    return { ok: false, reason: 'network', detail: String(e && e.message || e) };
+  }
+  if (!received) return { ok: false, reason: 'empty', detail: '下载到的文件为空' };
+  const blob = new Blob(parts, { type });
+  const objectUrl = URL.createObjectURL(blob);
+  // The blob URL is created in this document's origin, so the background must
+  // hand it to chrome.downloads immediately.
+  return { ok: true, objectUrl, size: blob.size, type };
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.target === 'ldp-offscreen' && message.type === 'revoke') {
+    // Give downloads.download() time to finish reading the blob, then free it.
+    const url = String(message.url || '');
+    if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ } }, 120000);
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (!message || message.target !== 'ldp-offscreen' || message.type !== 'download') return false;
+  proxyDownload(message.request || {}).then(sendResponse, error => {
+    sendResponse({ ok: false, reason: 'exception', detail: error && error.message ? error.message : String(error) });
+  });
+  return true;
+});

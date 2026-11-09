@@ -121,6 +121,10 @@ async function main() {
   }
   if (!target) throw new Error('test page not found');
   const page = await connect(target);
+  // Start from a clean document: a leftover panel from a previous run would
+  // double the composer and confuse the checks.
+  await page.send('Page.reload', { ignoreCache: false }).catch(() => {});
+  await sleep(2500);
   await page.send('Runtime.enable');
   await page.send('Page.enable');
   await sleep(1500);
@@ -151,7 +155,7 @@ async function main() {
 
   // wait for the answer to finish (mock streams slowly)
   let done = false;
-  for (let i = 0; i < 90; i += 1) {
+  for (let i = 0; i < 150; i += 1) {
     await sleep(800);
     const ax = await page.send('Accessibility.getFullAXTree');
     const text = ax.nodes.map(n => n.name && n.name.value).filter(Boolean).join('\n');
@@ -161,17 +165,44 @@ async function main() {
   check('summary finished streaming', done, done);
 
   // --- 3. TOC --------------------------------------------------------------
-  let toggles = await pick(page, 'summary-toc-toggle');
-  for (let i = 0; i < 15 && !toggles.length; i += 1) { await sleep(600); toggles = await pick(page, 'summary-toc-toggle'); }
-  check('TOC toggle exists', toggles.length > 0, toggles.length);
+  let triggers = await pick(page, 'toc-inline-trigger');
+  for (let i = 0; i < 15 && !triggers.length; i += 1) { await sleep(600); triggers = await pick(page, 'toc-inline-trigger'); }
+  check('outline trigger exists inside the pinned chapter bar', triggers.length > 0, triggers.length);
 
-  if (toggles.length) {
-    const collapsed = await callOn(page, toggles[0].nodeId, 'function(){const l=this.parentNode.querySelector(".summary-toc-list");return !!l.hidden}');
-    check('TOC starts collapsed', collapsed === true, collapsed);
-    await callOn(page, toggles[0].nodeId, 'function(){this.click();return true}');
-    await sleep(300);
+  if (triggers.length) {
+    // The trigger must be a child of the panel's heading, i.e. part of the bar.
+    const placement = await callOn(page, triggers[0].nodeId, [
+      'function(){',
+      '  const heading = this.closest("h1,h2,h3,h4");',
+      '  return {',
+      '    insideHeading: !!heading,',
+      '    headingSticky: heading ? heading.classList.contains("toc-sticky") : false,',
+      '    firstChild: heading ? heading.firstChild === this : false,',
+      '    badge: heading ? (heading.dataset.tocBadge || "") : ""',
+      '  };',
+      '}'
+    ].join('\n'));
+    check('trigger lives at the left of the sticky heading', placement && placement.insideHeading && placement.headingSticky && placement.firstChild, placement);
 
-    // click every entry with the mouse and verify the scroll really moves
+    const collapsed = await callOn(page, triggers[0].nodeId, 'function(){const l=this.closest(".summary-toc").querySelector(".summary-toc-list");return !!l.hidden}');
+    check('outline starts collapsed', collapsed === true, collapsed);
+
+    await callOn(page, triggers[0].nodeId, 'function(){this.click();return true}');
+    await sleep(350);
+
+    const opened = await callOn(page, triggers[0].nodeId, [
+      'function(){',
+      '  const l = this.closest(".summary-toc").querySelector(".summary-toc-list");',
+      '  const r = l.getBoundingClientRect();',
+      '  const hr = this.closest("h1,h2,h3,h4").getBoundingClientRect();',
+      '  return { hidden: l.hidden, count: l.querySelectorAll(".summary-toc-item").length,',
+      '    anchoredBelow: r.top >= hr.top, listTop: Math.round(r.top), barBottom: Math.round(hr.bottom), width: Math.round(r.width) };',
+      '}'
+    ].join('\n'));
+    check('outline opens below the bar with entries', opened && !opened.hidden && opened.count > 0, opened);
+    check('outline is anchored under the chapter bar', !!(opened && opened.anchoredBelow), opened);
+
+    // Click every entry with a real mouse press and verify the scroll really moves.
     const jumps = [];
     for (let i = 0; i < 5; i += 1) {
       const items = await pick(page, 'summary-toc-item');
@@ -179,9 +210,6 @@ async function main() {
       const geo = await callOn(page, items[i].nodeId, 'function(){const r=this.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),text:(this.textContent||"").slice(0,14)}}');
       const scroller = (await pick(page, 'summary-scroll'))[0];
       const before = await callOn(page, scroller.nodeId, 'function(){return Math.round(this.scrollTop)}');
-      // A real mouse press goes through hit-testing: catches overlay/clipping
-      // bugs.  document.elementFromPoint cannot see into a closed shadow root,
-      // so the press is dispatched at the button's own viewport rect.
       await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: geo.x, y: geo.y });
       await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: geo.x, y: geo.y, button: 'left', clickCount: 1 });
       await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: geo.x, y: geo.y, button: 'left', clickCount: 1 });
@@ -189,13 +217,25 @@ async function main() {
       const scroller2 = (await pick(page, 'summary-scroll'))[0];
       const after = await callOn(page, scroller2.nodeId, 'function(){return Math.round(this.scrollTop)}');
       jumps.push({ text: geo.text, before, after, moved: before !== after });
-      // reopen for the next entry
-      const t2 = await pick(page, 'summary-toc-toggle');
-      if (t2.length) await callOn(page, t2[0].nodeId, 'function(){this.click();return true}');
-      await sleep(200);
+      const t2 = await pick(page, 'toc-inline-trigger');
+      if (t2.length) {
+        const closed = await callOn(page, t2[0].nodeId, 'function(){const l=this.closest(".summary-toc").querySelector(".summary-toc-list");return !!l.hidden}');
+        if (closed) await callOn(page, t2[0].nodeId, 'function(){this.click();return true}');
+      }
+      await sleep(250);
     }
     const movedCount = jumps.filter(j => j.moved).length;
-    check('real mouse clicks on TOC entries scroll the summary', movedCount === jumps.length && jumps.length > 0, jumps);
+    check('real mouse clicks on outline entries scroll the summary', movedCount === jumps.length && jumps.length > 0, jumps);
+
+    // The trigger must follow the active chapter.
+    const followed = await callOn(page, (await pick(page, 'summary-scroll'))[0].nodeId, [
+      'function(){',
+      '  const bar = this.querySelector("h1.toc-sticky, h2.toc-sticky, h3.toc-sticky, h4.toc-sticky");',
+      '  const trigger = bar && bar.querySelector(".toc-inline-trigger");',
+      '  return { barText: bar ? (bar.textContent||"").replace("目录","").slice(0,16) : "", hasTrigger: !!trigger };',
+      '}'
+    ].join('\n'));
+    check('the trigger follows the pinned chapter', !!(followed && followed.hasTrigger), followed);
   }
 
   // --- 4. composer typing + IME -------------------------------------------

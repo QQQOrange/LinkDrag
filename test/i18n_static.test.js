@@ -10,10 +10,10 @@ const test = require('node:test');
 const ROOT = path.resolve(__dirname, '..');
 const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
-test('manifest is LinkDrag 1.1.19', () => {
+test('manifest is LinkDrag 1.1.20', () => {
   const manifest = JSON.parse(read('extension/manifest.json'));
   assert.equal(manifest.name, 'LinkDrag');
-  assert.equal(manifest.version, '1.1.19');
+  assert.equal(manifest.version, '1.1.20');
   assert.ok(manifest.permissions.includes('webRequest'));
   // Content scripts do not consume LinkDragI18N; loading the 20 KB language
   // layer into every frame duplicated storage work for no UI effect.

@@ -120,6 +120,7 @@ test('outline outside-click does not close on its own items inside a closed shad
   assert.match(source, /const rootNode = \(\(\) => \{ try \{ return wrap\.getRootNode\(\); \}/);
   assert.match(source, /rootNode\.addEventListener\('pointerdown', closeIfOutside, true\)/);
   assert.match(source, /if \(host && \(target === host \|\| \(host\.contains && host\.contains\(target\)\)\)\) return;/);
+
 });
 
 test('summary panel rebuilds do not accumulate outline or composer nodes', () => {
@@ -134,4 +135,28 @@ test('the composer keeps drafts and focus across a re-render', () => {
   assert.match(source, /item\.followupFocusWanted = true/);
   assert.match(source, /compositionend/);
   assert.doesNotMatch(source, /ui\.followupInput\.disabled = !!busy/);
+});
+
+
+
+test('the follow-up composer aligns with the summary content column', () => {
+  // The panel body inset is `17px 21px 13px`; the composer and the action bar
+  // must use the same horizontal inset or the panel looks ragged.
+  assert.match(source, /\.summary-scroll\{[^}]*padding:17px 21px 13px/);
+  assert.match(source, /\.followup-box\{[^}]*padding:9px 21px 10px/);
+  assert.match(source, /\.summary-actions\{[^}]*padding:10px 21px 12px/);
+});
+
+test('downloads go through the extension channel, not a CORS-bound page fetch', () => {
+  assert.match(source, /async function proxyDownload\(item, options\)/);
+  assert.match(source, /namespace: 'LPS_EXT',\s*\n\s*type: 'ldp:proxyDownload'/);
+  assert.match(source, /await proxyDownload\(item, \{ url: verified\.url/);
+  // Every bridge call must carry the namespace or the background drops it.
+  // Every new bridge call must carry the namespace or the background drops it.
+  for (const type of ['ldp:proxyDownload', 'ldp:getCapturedMedia', 'ldp:hlsPlaylist', 'ldp:hlsSegment']) {
+    const at = source.indexOf("type: '" + type + "'");
+    assert.ok(at > 0, type + ' call missing');
+    const window = source.slice(Math.max(0, at - 260), at);
+    assert.match(window, /namespace: 'LPS_EXT'/, type + ' must carry the namespace');
+  }
 });

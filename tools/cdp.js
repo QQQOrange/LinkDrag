@@ -25,12 +25,22 @@ async function connectTo(target) {
     pending.set(n, { resolve, reject });
     ws.send(JSON.stringify({ id: n, method, params: params || {} }));
   });
+  /** Collected CDP events, so console output and errors are visible to tests. */
+  const events = [];
+  ws.addEventListener('message', raw => {
+    const msg = JSON.parse(raw.data);
+    if (msg.id) return;
+    events.push({ method: msg.method, params: msg.params || {} });
+  });
+  const consoleText = () => events
+    .filter(e => e.method === 'Runtime.consoleAPICalled')
+    .map(e => (e.params.args || []).map(a => (a.value !== undefined ? String(a.value) : (a.description || ''))).join(' '));
   const evaluate = async expression => {
     const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true });
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.text || JSON.stringify(r.exceptionDetails).slice(0, 200));
     return r.result ? r.result.value : undefined;
   };
-  return { send, evaluate, close: () => ws.close() };
+  return { send, evaluate, close: () => ws.close(), events, consoleText };
 }
 
 async function listTargets(port) {

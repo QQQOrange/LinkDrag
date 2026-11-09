@@ -1,5 +1,19 @@
 # 变更记录
 
+## v1.1.20 — 视频下载真正可用（2026-11-09）
+
+三个真实缺陷让「下载视频」一直不工作，均已定位并修复：
+
+1. **按钮可见却点不动**：`setDownloadCapability` 用 `item.ui.videoDownloadBtn || item.ui.mediaDownload` 取按钮，面板切换模式后取到的是上一个面板残留、已脱离文档的节点，于是「启用」状态写到了死节点上，可见按钮只被改了 `hidden`，`disabled` 永远是 true。现在按当前 `panelMode` 选取仍在文档中的按钮。
+2. **卡在「正在解析视频下载地址…」**：`downloadMediaVideo()` 依赖 `item.mediaState`，而视频总结面板没有这个对象，函数直接静默返回。现在直接用能力探测已确认的候选地址下载（同源走页面内进度，跨源走扩展通道）。
+3. **跨域 CDN 一律 `Failed to fetch`**：内容脚本的 `fetch` 受页面 CORS 限制。新增扩展侧下载通道：offscreen 文档以扩展身份取流（带 cookie、不受 CORS 限制、分块回报进度），再由 `chrome.downloads` 保存。
+
+另外修复一个隐藏问题：新增的桥接调用漏了 `namespace: 'LPS_EXT'`，后台会直接丢弃消息，导致网络嗅探与 HLS 下载一直是空操作。
+
+- 追问框与操作栏的左右内边距改为 21px，和总结正文对齐（原先 14px，视觉上参差）。
+- 后台：嗅探结果持久化到 `chrome.storage.session`（service worker 休眠不再丢）、`onHeadersReceived` 按 content-type 识别无扩展名地址、offscreen 就绪竞态修复、SSRF 防护拦截十六进制/十进制 IP。
+- 新增 `tools/accept_real_download.js`：在真实公开 MP4 页面上验证「按钮可点 → 进度 → 文件落盘」。
+
 ## v1.1.19 — 输入方式、吸顶标题与视频下载（2026-11-09）
 
 - **追问框不再限制输入方式**：输入框改为普通文本框行为，隔离了所有全局快捷键 / 手势 /「点外面」处理器；不再在回答期间 `disabled`；IME 与语音输入的目标元素在面板重绘后不再被销毁（复用同一节点）；草稿与焦点跨重绘保留。实测支持键盘、`Input.insertText`（听写工具）、`execCommand`、Ctrl+V 粘贴、IME 组合输入、直接赋值六种路径。
